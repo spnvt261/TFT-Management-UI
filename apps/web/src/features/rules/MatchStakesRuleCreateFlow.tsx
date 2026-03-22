@@ -1,94 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Collapse,
-  DatePicker,
-  Divider,
-  Input,
-  InputNumber,
-  Select,
-  Space,
-  Switch,
-  Tag,
-  Typography,
-  message
-} from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import dayjs from "dayjs";
-import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
+import { Alert, Button, Card, Typography, message } from "antd";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
+import type { CreateRuleSetVersionRequest, RuleSetDto } from "@/types/api";
+import { FormApiError } from "@/components/common/FormApiError";
+import { SectionCard } from "@/components/layout/SectionCard";
+import { toAppError } from "@/api/httpClient";
+import { getErrorMessage } from "@/lib/error-messages";
+import { formatAmountVnd, formatPenaltyDestination } from "@/features/rules/builder-utils";
+import {
+  CurrencyAmountInput,
+  PenaltyList,
+  ReviewSummaryCard,
+  RuleBasicInfoSection,
+  RuleFormFooter,
+  RuleMatchSetupSection
+} from "@/features/rules/create-flow/components";
+import {
+  buildRankAmounts,
+  computeTopWinnerPayout,
+  defaultWinnerCount,
+  formatRankAmountList,
+  sameRankAmounts,
+  sumAmounts,
+  winnerOptionsByParticipant,
+  buildAutoRuleCode
+} from "@/features/rules/create-flow/utils";
 import {
   matchStakesRuleCreateFlowSchema,
-  parseJsonOrDefault,
   type MatchStakesRuleCreateFlowValues
 } from "@/features/rules/schemas";
 import { useCreateRuleSet, useCreateRuleSetVersionById } from "@/features/rules/hooks";
-import { formatAmountVnd, formatPenaltyDestination } from "@/features/rules/builder-utils";
-import { FormApiError } from "@/components/common/FormApiError";
-import { SectionCard } from "@/components/layout/SectionCard";
-import { getErrorMessage } from "@/lib/error-messages";
-import { toAppError } from "@/api/httpClient";
-import type {
-  CreateRuleSetVersionRequest,
-  MatchStakesPenaltyConfig,
-  MatchStakesPenaltyDestinationSelectorType,
-  RuleSetDto
-} from "@/types/api";
-
-const winnerOptionsByParticipant = {
-  3: [
-    { label: "1 winner (common)", value: 1 },
-    { label: "2 winners", value: 2 }
-  ],
-  4: [
-    { label: "1 winner", value: 1 },
-    { label: "2 winners (common)", value: 2 },
-    { label: "3 winners", value: 3 }
-  ]
-} as const;
-
-const destinationTypeOptions: Array<{ label: string; value: MatchStakesPenaltyDestinationSelectorType }> = [
-  { label: "Best participant", value: "BEST_PARTICIPANT" },
-  { label: "Match winner", value: "MATCH_WINNER" },
-  { label: "Fixed player", value: "FIXED_PLAYER" },
-  { label: "Fund account", value: "FUND_ACCOUNT" }
-];
-
-const defaultWinnerCount = (participantCount: 3 | 4) => (participantCount === 3 ? 1 : 2);
-
-const buildRankAmounts = (
-  start: number,
-  end: number,
-  existing: Array<{ relativeRank: number; amountVnd: number }>
-): Array<{ relativeRank: number; amountVnd: number }> => {
-  const existingMap = new Map(existing.map((item) => [item.relativeRank, item.amountVnd]));
-  const rows: Array<{ relativeRank: number; amountVnd: number }> = [];
-
-  for (let rank = start; rank <= end; rank += 1) {
-    rows.push({
-      relativeRank: rank,
-      amountVnd: existingMap.get(rank) ?? 0
-    });
-  }
-
-  return rows;
-};
-
-const parseRecordJson = (value?: string | null): Record<string, unknown> | null => {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = parseJsonOrDefault(value, null);
-  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-    return parsed as Record<string, unknown>;
-  }
-
-  return null;
-};
 
 interface Step2RecoveryState {
   createdRuleSet: RuleSetDto;
@@ -106,18 +49,14 @@ export const MatchStakesRuleCreateFlow = () => {
 
   const form = useForm<MatchStakesRuleCreateFlowValues>({
     resolver: zodResolver(matchStakesRuleCreateFlowSchema),
+    mode: "onChange",
     defaultValues: {
-      code: "",
       name: "",
       description: "",
-      status: "ACTIVE",
       isDefault: false,
       participantCount: 3,
       winnerCount: 1,
-      effectiveTo: "",
-      isActive: true,
-      summaryJsonText: "",
-      payouts: [{ relativeRank: 1, amountVnd: 0 }],
+      winnerPayouts: [],
       losses: [
         { relativeRank: 2, amountVnd: 0 },
         { relativeRank: 3, amountVnd: 0 }
@@ -128,12 +67,10 @@ export const MatchStakesRuleCreateFlow = () => {
 
   const participantCount = useWatch({ control: form.control, name: "participantCount" });
   const winnerCount = useWatch({ control: form.control, name: "winnerCount" });
-  const payouts = useWatch({ control: form.control, name: "payouts" }) ?? [];
+  const winnerPayouts = useWatch({ control: form.control, name: "winnerPayouts" }) ?? [];
   const losses = useWatch({ control: form.control, name: "losses" }) ?? [];
   const penalties = useWatch({ control: form.control, name: "penalties" }) ?? [];
-  const status = useWatch({ control: form.control, name: "status" });
   const isDefault = useWatch({ control: form.control, name: "isDefault" });
-  const isVersionActive = useWatch({ control: form.control, name: "isActive" });
 
   const penaltiesFieldArray = useFieldArray({
     control: form.control,
@@ -148,13 +85,35 @@ export const MatchStakesRuleCreateFlow = () => {
   }, [form, participantCount, winnerCount]);
 
   useEffect(() => {
-    form.setValue("payouts", buildRankAmounts(1, winnerCount, payouts), { shouldValidate: true });
-    form.setValue("losses", buildRankAmounts(winnerCount + 1, participantCount, losses), { shouldValidate: true });
-  }, [form, participantCount, winnerCount]);
+    const expectedWinnerRows = winnerCount > 1 ? buildRankAmounts(2, winnerCount, winnerPayouts) : [];
+    if (!sameRankAmounts(winnerPayouts, expectedWinnerRows)) {
+      form.setValue("winnerPayouts", expectedWinnerRows, { shouldValidate: true });
+    }
 
-  const totalPayout = useMemo(() => payouts.reduce((sum, item) => sum + (item.amountVnd || 0), 0), [payouts]);
-  const totalLoss = useMemo(() => losses.reduce((sum, item) => sum + (item.amountVnd || 0), 0), [losses]);
-  const isBalanced = totalPayout === totalLoss;
+    const expectedLossRows = buildRankAmounts(winnerCount + 1, participantCount, losses);
+    if (!sameRankAmounts(losses, expectedLossRows)) {
+      form.setValue("losses", expectedLossRows, { shouldValidate: true });
+    }
+  }, [form, losses, participantCount, winnerCount, winnerPayouts]);
+
+  const topWinnerPayout = useMemo(
+    () => computeTopWinnerPayout(losses, winnerPayouts),
+    [losses, winnerPayouts]
+  );
+  const payouts = useMemo(
+    () => [{ relativeRank: 1, amountVnd: topWinnerPayout }, ...winnerPayouts],
+    [topWinnerPayout, winnerPayouts]
+  );
+  const totalLoss = useMemo(() => sumAmounts(losses), [losses]);
+  const totalPayout = useMemo(() => sumAmounts(payouts), [payouts]);
+  const isBalanced = totalLoss === totalPayout;
+
+  const topWinnerError =
+    topWinnerPayout < 0
+      ? "Top 1 payout is negative. Reduce lower winner payouts or increase loser amounts."
+      : winnerCount > 1 && topWinnerPayout <= (winnerPayouts.find((item) => item.relativeRank === 2)?.amountVnd ?? 0)
+        ? "Top 1 payout must be greater than rank 2 payout."
+        : null;
 
   const reviewPenaltyLines = useMemo(() => {
     if (!penalties.length) {
@@ -169,29 +128,37 @@ export const MatchStakesRuleCreateFlow = () => {
     );
   }, [penalties]);
 
-  const createVersionPayload = (values: MatchStakesRuleCreateFlowValues): CreateRuleSetVersionRequest => ({
-    participantCountMin: values.participantCount,
-    participantCountMax: values.participantCount,
-    effectiveTo: values.effectiveTo || null,
-    isActive: values.isActive,
-    summaryJson: parseRecordJson(values.summaryJsonText),
-    builderType: "MATCH_STAKES_PAYOUT",
-    builderConfig: {
-      participantCount: values.participantCount,
-      winnerCount: values.winnerCount,
-      payouts: values.payouts.map((item) => ({ relativeRank: item.relativeRank, amountVnd: item.amountVnd })),
-      losses: values.losses.map((item) => ({ relativeRank: item.relativeRank, amountVnd: item.amountVnd })),
-      penalties: values.penalties.map((penalty) => ({
-        absolutePlacement: penalty.absolutePlacement,
-        amountVnd: penalty.amountVnd,
-        destinationSelectorType: penalty.destinationSelectorType,
-        destinationSelectorJson: parseRecordJson(penalty.destinationSelectorJsonText),
-        code: penalty.code || undefined,
-        name: penalty.name || undefined,
-        description: penalty.description || undefined
-      }))
-    }
-  });
+  const createVersionPayload = (
+    values: MatchStakesRuleCreateFlowValues
+  ): CreateRuleSetVersionRequest => {
+    const computedTopPayout = computeTopWinnerPayout(values.losses, values.winnerPayouts);
+
+    return {
+      participantCountMin: values.participantCount,
+      participantCountMax: values.participantCount,
+      effectiveTo: null,
+      isActive: true,
+      summaryJson: null,
+      builderType: "MATCH_STAKES_PAYOUT",
+      builderConfig: {
+        participantCount: values.participantCount,
+        winnerCount: values.winnerCount,
+        payouts: [{ relativeRank: 1, amountVnd: computedTopPayout }, ...values.winnerPayouts].map((item) => ({
+          relativeRank: item.relativeRank,
+          amountVnd: item.amountVnd
+        })),
+        losses: values.losses.map((item) => ({
+          relativeRank: item.relativeRank,
+          amountVnd: item.amountVnd
+        })),
+        penalties: values.penalties.map((penalty) => ({
+          absolutePlacement: penalty.absolutePlacement,
+          amountVnd: penalty.amountVnd,
+          destinationSelectorType: penalty.destinationSelectorType
+        }))
+      }
+    };
+  };
 
   const submit = form.handleSubmit(async (values) => {
     setApiError(null);
@@ -200,10 +167,10 @@ export const MatchStakesRuleCreateFlow = () => {
     try {
       const createdRuleSet = await createRuleSetMutation.mutateAsync({
         module: "MATCH_STAKES",
-        code: values.code,
+        code: buildAutoRuleCode("MS", values.name),
         name: values.name,
         description: values.description || null,
-        status: values.status,
+        status: "ACTIVE",
         isDefault: values.isDefault
       });
 
@@ -219,9 +186,7 @@ export const MatchStakesRuleCreateFlow = () => {
         navigate(`/rules/${createdRuleSet.id}/versions/${createdVersion.id}`);
       } catch (step2Error) {
         const errorMessage = getErrorMessage(toAppError(step2Error));
-        setApiError(
-          `Rule set metadata was created, but version creation failed. You can retry version creation or open the created rule set.`
-        );
+        setApiError("Rule set metadata was created, but version creation failed. You can retry or open the created rule set.");
         setStep2Recovery({ createdRuleSet, versionPayload, errorMessage });
       }
     } catch (error) {
@@ -243,7 +208,7 @@ export const MatchStakesRuleCreateFlow = () => {
       message.success("Version creation retried successfully");
       navigate(`/rules/${step2Recovery.createdRuleSet.id}/versions/${createdVersion.id}`);
     } catch (error) {
-      setApiError("Retry failed. Please review the error and use Open Rule Set Detail if needed.");
+      setApiError("Retry failed. Please review the error and open the created rule set if needed.");
       setStep2Recovery((current) =>
         current
           ? {
@@ -255,17 +220,25 @@ export const MatchStakesRuleCreateFlow = () => {
     }
   };
 
-  const addPenaltyPreset = (absolutePlacement: number) => {
-    penaltiesFieldArray.append({
-      absolutePlacement,
-      amountVnd: 10000,
-      destinationSelectorType: "BEST_PARTICIPANT",
-      destinationSelectorJsonText: "",
-      code: "",
-      name: "",
-      description: ""
-    });
+  const handleCancel = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/rules");
   };
+
+  const winnerPayoutErrorMessage =
+    form.formState.errors.winnerPayouts && !Array.isArray(form.formState.errors.winnerPayouts)
+      ? String(form.formState.errors.winnerPayouts.message ?? "")
+      : "";
+  const lossErrorMessage =
+    form.formState.errors.losses && !Array.isArray(form.formState.errors.losses)
+      ? String(form.formState.errors.losses.message ?? "")
+      : "";
+
+  const submitDisabled = !form.formState.isValid || !isBalanced || Boolean(topWinnerError);
 
   return (
     <form className="space-y-5" onSubmit={submit}>
@@ -291,141 +264,52 @@ export const MatchStakesRuleCreateFlow = () => {
         />
       ) : null}
 
-      <SectionCard title="Basic Info" description="Business information for this Match Stakes rule">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Rule name</label>
-            <Controller control={form.control} name="name" render={({ field }) => <Input {...field} size="large" placeholder="Sunday Squad Rule" />} />
-            {form.formState.errors.name ? <div className="mt-1 text-xs text-red-600">{form.formState.errors.name.message}</div> : null}
-          </div>
+      <RuleBasicInfoSection
+        control={form.control}
+        errors={form.formState.errors}
+        description="Business information for this Match Stakes rule"
+        hideCode
+      />
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">Code</label>
-            <Controller control={form.control} name="code" render={({ field }) => <Input {...field} size="large" placeholder="MS_3P_STANDARD" />} />
-            {form.formState.errors.code ? <div className="mt-1 text-xs text-red-600">{form.formState.errors.code.message}</div> : null}
-          </div>
-        </div>
+      <RuleMatchSetupSection
+        control={form.control}
+        participantCountName="participantCount"
+        winnerCountName="winnerCount"
+        winnerOptions={[...winnerOptionsByParticipant[participantCount]]}
+        winnerError={form.formState.errors.winnerCount?.message}
+        description="Choose participant count and winner count"
+      />
 
-        <div className="mt-4">
-          <label className="mb-1 block text-sm font-medium">Description (optional)</label>
-          <Controller control={form.control} name="description" render={({ field }) => <Input.TextArea {...field} rows={3} />} />
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Rule set status</label>
-            <Controller
-              control={form.control}
-              name="status"
-              render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onChange={field.onChange}
-                  options={[
-                    { label: "Active", value: "ACTIVE" },
-                    { label: "Inactive", value: "INACTIVE" }
-                  ]}
-                />
-              )}
-            />
-          </div>
-
-          <div className="flex items-end">
-            <div className="flex w-full items-center justify-between rounded-xl border border-slate-200 px-4 py-2.5">
-              <span className="text-sm font-medium">Set as default</span>
-              <Controller control={form.control} name="isDefault" render={({ field }) => <Switch checked={field.value} onChange={field.onChange} />} />
-            </div>
-          </div>
-
-          <div className="flex items-end">
-            <div className="flex w-full items-center justify-between rounded-xl border border-slate-200 px-4 py-2.5">
-              <span className="text-sm font-medium">Activate version now</span>
-              <Controller control={form.control} name="isActive" render={({ field }) => <Switch checked={field.value} onChange={field.onChange} />} />
-            </div>
-          </div>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Match Setup" description="Choose participants and winner count">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Participant count</label>
-            <Controller
-              control={form.control}
-              name="participantCount"
-              render={({ field }) => (
-                <Select
-                  size="large"
-                  value={field.value}
-                  onChange={(value: 3 | 4) => field.onChange(value)}
-                  options={[
-                    { label: "3 players", value: 3 },
-                    { label: "4 players", value: 4 }
-                  ]}
-                />
-              )}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium">Winner count</label>
-            <Controller
-              control={form.control}
-              name="winnerCount"
-              render={({ field }) => (
-                <Select size="large" value={field.value} onChange={field.onChange} options={[...winnerOptionsByParticipant[participantCount]]} />
-              )}
-            />
-            {form.formState.errors.winnerCount ? (
-              <div className="mt-1 text-xs text-red-600">{form.formState.errors.winnerCount.message}</div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Version effective to (optional)</label>
-            <Controller
-              control={form.control}
-              name="effectiveTo"
-              render={({ field }) => (
-                <DatePicker
-                  className="w-full"
-                  showTime
-                  value={field.value ? dayjs(field.value) : null}
-                  onChange={(value) => field.onChange(value ? value.toISOString() : "")}
-                />
-              )}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium">Summary JSON (optional)</label>
-            <Controller
-              control={form.control}
-              name="summaryJsonText"
-              render={({ field }) => <Input.TextArea {...field} rows={2} placeholder='{"note":"optional"}' />}
-            />
-          </div>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Base Payouts and Losses" description="Configure winner payouts and loser losses by relative rank">
+      <SectionCard
+        title="Base Payouts and Losses"
+        description="Enter loser amounts and lower winner payouts. Rank 1 payout is auto-calculated."
+      >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card title="Winners" className="!border-emerald-200 !bg-emerald-50/40">
             <div className="space-y-3">
-              {payouts.map((item, index) => (
-                <div key={`payout-${item.relativeRank}`} className="grid grid-cols-[120px_1fr] gap-3">
-                  <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-emerald-700">Rank {item.relativeRank}</div>
-                  <Controller
-                    control={form.control}
-                    name={`payouts.${index}.amountVnd`}
-                    render={({ field }) => (
-                      <InputNumber min={1} precision={0} value={field.value} onChange={(value) => field.onChange(value ?? 0)} className="w-full" addonAfter="VND" />
-                    )}
-                  />
+              <div className="grid grid-cols-[120px_1fr] gap-3">
+                <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-emerald-700">
+                  Rank 1
                 </div>
-              ))}
+                <CurrencyAmountInput value={topWinnerPayout} disabled min={0} />
+              </div>
+
+              {winnerPayouts.length === 0 ? (
+                <div className="text-xs text-slate-500">No additional winner payout fields for the current winner count.</div>
+              ) : (
+                winnerPayouts.map((item, index) => (
+                  <div key={`winner-${item.relativeRank}`} className="grid grid-cols-[120px_1fr] gap-3">
+                    <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-emerald-700">
+                      Rank {item.relativeRank}
+                    </div>
+                    <Controller
+                      control={form.control}
+                      name={`winnerPayouts.${index}.amountVnd`}
+                      render={({ field }) => <CurrencyAmountInput value={field.value} onChange={field.onChange} min={0} />}
+                    />
+                  </div>
+                ))
+              )}
             </div>
           </Card>
 
@@ -433,13 +317,13 @@ export const MatchStakesRuleCreateFlow = () => {
             <div className="space-y-3">
               {losses.map((item, index) => (
                 <div key={`loss-${item.relativeRank}`} className="grid grid-cols-[120px_1fr] gap-3">
-                  <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-rose-700">Rank {item.relativeRank}</div>
+                  <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-rose-700">
+                    Rank {item.relativeRank}
+                  </div>
                   <Controller
                     control={form.control}
                     name={`losses.${index}.amountVnd`}
-                    render={({ field }) => (
-                      <InputNumber min={1} precision={0} value={field.value} onChange={(value) => field.onChange(value ?? 0)} className="w-full" addonAfter="VND" />
-                    )}
+                    render={({ field }) => <CurrencyAmountInput value={field.value} onChange={field.onChange} min={0} />}
                   />
                 </div>
               ))}
@@ -447,177 +331,69 @@ export const MatchStakesRuleCreateFlow = () => {
           </Card>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <div className="text-xs text-slate-500">Total payouts</div>
-            <div className="text-base font-semibold">{formatAmountVnd(totalPayout)} VND</div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <div className="text-xs text-slate-500">Total losses</div>
-            <div className="text-base font-semibold">{formatAmountVnd(totalLoss)} VND</div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <div className="text-xs text-slate-500">Balance</div>
-            <div className={`text-base font-semibold ${isBalanced ? "text-green-600" : "text-red-600"}`}>{isBalanced ? "Balanced" : "Unbalanced"}</div>
-          </div>
-        </div>
-
-        <Alert
-          className="mt-3"
-          type={isBalanced ? "success" : "error"}
-          showIcon
-          message={isBalanced ? "Base payouts/losses are balanced." : "Total payouts and losses must be equal."}
-        />
+        {winnerPayoutErrorMessage ? <div className="mt-2 text-xs text-red-600">{winnerPayoutErrorMessage}</div> : null}
+        {lossErrorMessage ? <div className="mt-2 text-xs text-red-600">{lossErrorMessage}</div> : null}
+        {topWinnerError ? <div className="mt-2 text-xs text-red-600">{topWinnerError}</div> : null}
+        {!topWinnerError && isBalanced ? (
+          <Typography.Text className="mt-2 block text-xs text-slate-600">{`Auto-calculated top payout: ${formatAmountVnd(topWinnerPayout)} VND`}</Typography.Text>
+        ) : null}
       </SectionCard>
 
-      <SectionCard
-        title="Special Penalties"
-        description="Extra penalties by TFT absolute placement"
-        actions={
-          <Space wrap>
-            <Button icon={<PlusOutlined />} onClick={() => addPenaltyPreset(2)}>Add top2 penalty</Button>
-            <Button icon={<PlusOutlined />} onClick={() => addPenaltyPreset(8)}>Add top8 penalty</Button>
-            <Button
-              type="dashed"
-              icon={<PlusOutlined />}
-              onClick={() =>
-                penaltiesFieldArray.append({
-                  absolutePlacement: 1,
-                  amountVnd: 10000,
-                  destinationSelectorType: "BEST_PARTICIPANT",
-                  destinationSelectorJsonText: "",
-                  code: "",
-                  name: "",
-                  description: ""
-                })
-              }
-            >
-              Add custom penalty
-            </Button>
-          </Space>
+      <PenaltyList
+        control={form.control}
+        fields={penaltiesFieldArray.fields}
+        errors={form.formState.errors}
+        onAdd={() =>
+          penaltiesFieldArray.append({
+            absolutePlacement: 1,
+            amountVnd: 0,
+            destinationSelectorType: "BEST_PARTICIPANT"
+          })
         }
-      >
-        {penaltiesFieldArray.fields.length === 0 ? (
-          <Alert showIcon type="info" message="No penalty rows. Add one only when you need special top-X cases." />
-        ) : (
-          <div className="space-y-4">
-            {penaltiesFieldArray.fields.map((field, index) => (
-              <Card key={field.id} size="small" className="!bg-slate-50">
-                <div className="mb-3 flex items-center justify-between">
-                  <Tag>{`Penalty #${index + 1}`}</Tag>
-                  <Button danger icon={<DeleteOutlined />} onClick={() => penaltiesFieldArray.remove(index)} />
-                </div>
+        onRemove={penaltiesFieldArray.remove}
+      />
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">Absolute placement (1..8)</label>
-                    <Controller
-                      control={form.control}
-                      name={`penalties.${index}.absolutePlacement`}
-                      render={({ field: penaltyField }) => (
-                        <InputNumber min={1} max={8} precision={0} value={penaltyField.value} onChange={(value) => penaltyField.onChange(value ?? 1)} className="w-full" />
-                      )}
-                    />
+      <ReviewSummaryCard
+        module="MATCH_STAKES"
+        isDefault={isDefault}
+        rows={[
+          {
+            label: "Match setup",
+            value: `${participantCount} players, ${winnerCount} winner${winnerCount > 1 ? "s" : ""}`
+          },
+          {
+            label: "Losers",
+            value: formatRankAmountList(losses, "-")
+          },
+          {
+            label: "Winners",
+            value: formatRankAmountList(payouts, "+")
+          },
+          {
+            label: "Penalties",
+            value: (
+              <div className="space-y-1">
+                {reviewPenaltyLines.map((line) => (
+                  <div key={line} className="text-xs text-slate-600">
+                    {line}
                   </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">Amount</label>
-                    <Controller
-                      control={form.control}
-                      name={`penalties.${index}.amountVnd`}
-                      render={({ field: penaltyField }) => (
-                        <InputNumber min={1} precision={0} value={penaltyField.value} onChange={(value) => penaltyField.onChange(value ?? 0)} className="w-full" addonAfter="VND" />
-                      )}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-medium">Destination selector</label>
-                    <Controller
-                      control={form.control}
-                      name={`penalties.${index}.destinationSelectorType`}
-                      render={({ field: penaltyField }) => <Select value={penaltyField.value} onChange={penaltyField.onChange} options={destinationTypeOptions} />}
-                    />
-                  </div>
-                </div>
-
-                <Collapse
-                  className="mt-3"
-                  items={[
-                    {
-                      key: "advanced",
-                      label: "Advanced fields (optional)",
-                      children: (
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                            <Controller
-                              control={form.control}
-                              name={`penalties.${index}.code`}
-                              render={({ field: penaltyField }) => <Input {...penaltyField} placeholder="Penalty code" />}
-                            />
-                            <Controller
-                              control={form.control}
-                              name={`penalties.${index}.name`}
-                              render={({ field: penaltyField }) => <Input {...penaltyField} placeholder="Penalty name" />}
-                            />
-                          </div>
-
-                          <Controller
-                            control={form.control}
-                            name={`penalties.${index}.description`}
-                            render={({ field: penaltyField }) => <Input.TextArea {...penaltyField} rows={2} placeholder="Description" />}
-                          />
-
-                          <Controller
-                            control={form.control}
-                            name={`penalties.${index}.destinationSelectorJsonText`}
-                            render={({ field: penaltyField }) => <Input.TextArea {...penaltyField} rows={2} placeholder='{"playerId": "..."}' />}
-                          />
-                        </div>
-                      )
-                    }
-                  ]}
-                />
-              </Card>
-            ))}
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard title="Review and Submit" description="Final check before creating this Match Stakes rule">
-        <div className="space-y-3 text-sm text-slate-700">
-          <div className="flex flex-wrap gap-2">
-            <Tag color="blue">Module: MATCH_STAKES</Tag>
-            <Tag color={status === "ACTIVE" ? "green" : "default"}>Rule Set: {status}</Tag>
-            <Tag color={isVersionActive ? "green" : "default"}>Version: {isVersionActive ? "Active" : "Inactive"}</Tag>
-            <Tag color={isDefault ? "processing" : "default"}>{isDefault ? "Default" : "Non-default"}</Tag>
-          </div>
-
-          <div>{`${participantCount} players, ${winnerCount} winner${winnerCount > 1 ? "s" : ""}`}</div>
-          <div>{`Payouts: ${payouts.map((item) => `R${item.relativeRank} +${formatAmountVnd(item.amountVnd)}`).join(" | ")}`}</div>
-          <div>{`Losses: ${losses.map((item) => `R${item.relativeRank} -${formatAmountVnd(item.amountVnd)}`).join(" | ")}`}</div>
-          <div className="space-y-1">
-            <div>Penalties:</div>
-            {reviewPenaltyLines.map((line, index) => (
-              <div key={`${index}-${line}`} className="pl-3 text-xs text-slate-600">
-                - {line}
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-
-        <Divider />
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button onClick={() => navigate("/rules")}>Cancel</Button>
-          <Button type="primary" htmlType="submit" loading={createRuleSetMutation.isPending || createVersionMutation.isPending} disabled={!isBalanced}>
-            Create Match Stakes Rule
-          </Button>
-        </div>
-      </SectionCard>
+            )
+          }
+        ]}
+        footer={
+          <RuleFormFooter
+            onCancel={handleCancel}
+            submitLabel="Create Match Stakes Rule"
+            submitLoading={createRuleSetMutation.isPending || createVersionMutation.isPending}
+            submitDisabled={submitDisabled}
+          />
+        }
+      />
 
       {!isBalanced ? (
-        <Typography.Text type="danger">Submission is disabled until total payouts equals total losses.</Typography.Text>
+        <Typography.Text type="danger">Submission is disabled until payouts and losses are balanced.</Typography.Text>
       ) : null}
     </form>
   );

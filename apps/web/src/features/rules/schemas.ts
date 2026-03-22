@@ -36,10 +36,16 @@ const jsonTextSchema = z
   }, "Must be valid JSON");
 
 const positiveIntSchema = z.number().int().positive("Amount must be a positive integer");
+const nonNegativeIntSchema = z.number().int().min(0, "Amount must be a non-negative integer");
 
 const rankAmountSchema = z.object({
   relativeRank: z.number().int().min(1),
   amountVnd: positiveIntSchema
+});
+
+const nonNegativeRankAmountSchema = z.object({
+  relativeRank: z.number().int().min(1),
+  amountVnd: nonNegativeIntSchema
 });
 
 const penaltyDestinationTypeSchema = z.enum([
@@ -57,6 +63,22 @@ const penaltySchema = z.object({
   code: z.string().max(80).optional().or(z.literal("")),
   name: z.string().max(150).optional().or(z.literal("")),
   description: z.string().optional().or(z.literal(""))
+});
+
+const simplifiedPenaltyDestinationTypeSchema = z.enum(["BEST_PARTICIPANT", "FUND_ACCOUNT"] as [
+  MatchStakesPenaltyDestinationSelectorType,
+  MatchStakesPenaltyDestinationSelectorType
+]);
+
+const simplifiedPenaltySchema = z.object({
+  absolutePlacement: z.number().int().min(1).max(8),
+  amountVnd: nonNegativeIntSchema,
+  destinationSelectorType: simplifiedPenaltyDestinationTypeSchema
+});
+
+const groupFundPenaltySchema = z.object({
+  absolutePlacement: z.number().int().min(1).max(8),
+  amountVnd: nonNegativeIntSchema
 });
 
 const isUnique = (values: number[]) => new Set(values).size === values.length;
@@ -153,10 +175,178 @@ const refineMatchStakesBuilder = (
 
 export const matchStakesVersionBuilderSchema = matchStakesBuilderFormBaseSchema.superRefine(refineMatchStakesBuilder);
 
+const matchStakesRuleCreateFlowBaseSchema = z.object({
+  participantCount: z.union([z.literal(3), z.literal(4)]),
+  winnerCount: z.number().int().min(1),
+  winnerPayouts: z.array(nonNegativeRankAmountSchema),
+  losses: z.array(nonNegativeRankAmountSchema).min(1),
+  penalties: z.array(simplifiedPenaltySchema)
+});
+
+const refineMatchStakesRuleCreateFlow = (
+  value: {
+    participantCount: 3 | 4;
+    winnerCount: number;
+    winnerPayouts: Array<{ relativeRank: number; amountVnd: number }>;
+    losses: Array<{ relativeRank: number; amountVnd: number }>;
+  },
+  ctx: z.RefinementCtx
+) => {
+  if (value.winnerCount >= value.participantCount) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Winner count must be smaller than participant count",
+      path: ["winnerCount"]
+    });
+  }
+
+  const winnerRanks = value.winnerPayouts.map((item) => item.relativeRank);
+  const lossRanks = value.losses.map((item) => item.relativeRank);
+
+  if (!isUnique(winnerRanks)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Winner payout ranks must be unique",
+      path: ["winnerPayouts"]
+    });
+  }
+
+  if (!isUnique(lossRanks)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Loser ranks must be unique",
+      path: ["losses"]
+    });
+  }
+
+  const expectedWinnerRanks = Array.from({ length: Math.max(0, value.winnerCount - 1) }, (_, index) => index + 2);
+  const expectedLossRanks = Array.from(
+    { length: value.participantCount - value.winnerCount },
+    (_, index) => index + value.winnerCount + 1
+  );
+
+  const winnerSet = new Set(winnerRanks);
+  const lossSet = new Set(lossRanks);
+
+  const winnerCoverageValid =
+    winnerSet.size === expectedWinnerRanks.length &&
+    expectedWinnerRanks.every((rank) => winnerSet.has(rank));
+  const lossCoverageValid = lossSet.size === expectedLossRanks.length && expectedLossRanks.every((rank) => lossSet.has(rank));
+
+  if (!winnerCoverageValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Winner payout rows must cover ranks 2..winner count",
+      path: ["winnerPayouts"]
+    });
+  }
+
+  if (!lossCoverageValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Loser rows must cover non-winner ranks",
+      path: ["losses"]
+    });
+  }
+
+  const totalLoss = value.losses.reduce((sum, item) => sum + item.amountVnd, 0);
+  const totalOtherWinnerPayout = value.winnerPayouts.reduce((sum, item) => sum + item.amountVnd, 0);
+  const topWinnerPayout = totalLoss - totalOtherWinnerPayout;
+
+  if (topWinnerPayout < 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Top 1 payout cannot be negative. Reduce lower winner payouts or increase losses.",
+      path: ["winnerPayouts"]
+    });
+  }
+
+  const totalPayout = topWinnerPayout + totalOtherWinnerPayout;
+  if (totalPayout !== totalLoss) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Payouts and losses must balance exactly",
+      path: ["losses"]
+    });
+  }
+
+  if (value.winnerCount > 1) {
+    const rank2Payout = value.winnerPayouts.find((item) => item.relativeRank === 2)?.amountVnd ?? 0;
+    if (topWinnerPayout <= rank2Payout) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Winner rank 1 payout must be greater than winner rank 2",
+        path: ["winnerPayouts"]
+      });
+    }
+  }
+};
+
 export const matchStakesRuleCreateFlowSchema = ruleSetMetaSchema
-  .omit({ module: true })
-  .extend(matchStakesBuilderFormBaseSchema.shape)
-  .superRefine(refineMatchStakesBuilder);
+  .omit({ module: true, status: true, code: true })
+  .extend(matchStakesRuleCreateFlowBaseSchema.shape)
+  .superRefine(refineMatchStakesRuleCreateFlow);
+
+const groupFundRuleCreateFlowBaseSchema = z.object({
+  participantCount: z.union([z.literal(3), z.literal(4)]),
+  contributions: z.array(nonNegativeRankAmountSchema).min(1),
+  penalties: z.array(groupFundPenaltySchema)
+});
+
+const refineGroupFundRuleCreateFlow = (
+  value: {
+    participantCount: 3 | 4;
+    contributions: Array<{ relativeRank: number; amountVnd: number }>;
+    penalties: Array<{ absolutePlacement: number; amountVnd: number }>;
+  },
+  ctx: z.RefinementCtx
+) => {
+  const contributionRanks = value.contributions.map((item) => item.relativeRank);
+  if (!isUnique(contributionRanks)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Contribution ranks must be unique",
+      path: ["contributions"]
+    });
+  }
+
+  const expectedRanks = Array.from({ length: value.participantCount }, (_, index) => index + 1);
+  const contributionSet = new Set(contributionRanks);
+  const coverageValid =
+    contributionSet.size === expectedRanks.length && expectedRanks.every((rank) => contributionSet.has(rank));
+
+  if (!coverageValid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Contribution rows must cover all participant ranks",
+      path: ["contributions"]
+    });
+  }
+
+  const penaltyPlacements = value.penalties.map((item) => item.absolutePlacement);
+  if (!isUnique(penaltyPlacements)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Penalty placements must be unique",
+      path: ["penalties"]
+    });
+  }
+
+  const hasPositiveContribution = value.contributions.some((item) => item.amountVnd > 0);
+  const hasPositivePenalty = value.penalties.some((item) => item.amountVnd > 0);
+  if (!hasPositiveContribution && !hasPositivePenalty) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "At least one contribution or penalty amount must be greater than 0",
+      path: ["contributions"]
+    });
+  }
+};
+
+export const groupFundRuleCreateFlowSchema = ruleSetMetaSchema
+  .omit({ module: true, status: true, code: true })
+  .extend(groupFundRuleCreateFlowBaseSchema.shape)
+  .superRefine(refineGroupFundRuleCreateFlow);
 
 const conditionSchema = z.object({
   conditionKey: z.enum([
@@ -249,6 +439,8 @@ export const ruleSetVersionMetaSchema = z.object({
 export type RuleSetMetaValues = z.infer<typeof ruleSetMetaSchema>;
 export type MatchStakesVersionBuilderValues = z.infer<typeof matchStakesVersionBuilderSchema>;
 export type MatchStakesRuleCreateFlowValues = z.infer<typeof matchStakesRuleCreateFlowSchema>;
+export type MatchStakesCreatePenaltyValues = z.infer<typeof simplifiedPenaltySchema>;
+export type GroupFundRuleCreateFlowValues = z.infer<typeof groupFundRuleCreateFlowSchema>;
 export type RawRuleSetVersionValues = z.infer<typeof rawRuleSetVersionSchema>;
 export type RuleSetVersionMetaValues = z.infer<typeof ruleSetVersionMetaSchema>;
 

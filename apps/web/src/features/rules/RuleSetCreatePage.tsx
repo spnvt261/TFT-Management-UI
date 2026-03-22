@@ -1,36 +1,16 @@
-import { Alert, Button, Card, message } from "antd";
+import { Button, Card } from "antd";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MatchStakesRuleCreateFlow } from "@/features/rules/MatchStakesRuleCreateFlow";
-import { RuleSetMetaForm } from "@/features/rules/RuleSetMetaForm";
-import { useCreateRuleSet } from "@/features/rules/hooks";
+import { GroupFundRuleCreateFlow } from "@/features/rules/GroupFundRuleCreateFlow";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
-import type { RuleSetMetaValues } from "@/features/rules/schemas";
 import { moduleLabels } from "@/lib/labels";
-
-const groupFundSubtitle =
-  "Group Fund builder mode is not enabled yet, so this flow creates rule-set metadata first and versions can be added later.";
 
 export const RuleSetCreatePage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const module = searchParams.get("module");
-  const createMutation = useCreateRuleSet();
-
-  const onSubmitGroupFund = async (values: RuleSetMetaValues) => {
-    const created = await createMutation.mutateAsync({
-      module: "GROUP_FUND",
-      code: values.code,
-      name: values.name,
-      description: values.description || null,
-      status: values.status,
-      isDefault: values.isDefault
-    });
-
-    message.success("Group Fund rule set metadata created");
-    navigate(`/rules/${created.id}`);
-  };
 
   if (module === "MATCH_STAKES") {
     return (
@@ -50,20 +30,10 @@ export const RuleSetCreatePage = () => {
       <PageContainer>
         <PageHeader
           title={`Create ${moduleLabels.GROUP_FUND} Rule`}
-          subtitle={groupFundSubtitle}
+          subtitle="Configure contribution obligations and fund movements by participant rank."
         />
 
-        <SectionCard>
-          <Alert showIcon type="info" message="Metadata-first flow" description={groupFundSubtitle} />
-        </SectionCard>
-
-        <RuleSetMetaForm
-          initialModule="GROUP_FUND"
-          lockModule
-          submitLabel="Create rule set"
-          submitting={createMutation.isPending}
-          onSubmit={onSubmitGroupFund}
-        />
+        <GroupFundRuleCreateFlow />
       </PageContainer>
     );
   }
@@ -72,7 +42,7 @@ export const RuleSetCreatePage = () => {
     <PageContainer>
       <PageHeader
         title="Create Rule"
-        subtitle="Choose the module first. Match Stakes opens a complete business rule builder flow."
+        subtitle="Choose a module to open the guided business-friendly rule creation flow."
       />
 
       <SectionCard title="Select Module" description="Pick the business flow you want to start">
@@ -93,7 +63,7 @@ export const RuleSetCreatePage = () => {
             <div className="space-y-3">
               <div className="text-lg font-semibold">Group Fund</div>
               <div className="text-sm text-slate-600">
-                Create metadata first. Builder flow is currently focused on Match Stakes.
+                Configure contribution obligations and fund movement rules in one guided flow.
               </div>
               <Button onClick={() => navigate("/rules/new?module=GROUP_FUND")}>Create Group Fund Rule</Button>
             </div>
