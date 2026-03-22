@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, DatePicker, Drawer, Input, InputNumber, List, Pagination, Select, Tabs, Tag, message } from "antd";
+import { Button, DatePicker, Drawer, Input, InputNumber, List, Pagination, Select, Tabs, Tag, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { Controller, useForm } from "react-hook-form";
@@ -23,6 +23,11 @@ import { manualTransactionSchema, type ManualTransactionValues } from "@/feature
 import { FormApiError } from "@/components/common/FormApiError";
 import { getErrorMessage } from "@/lib/error-messages";
 import { toAppError } from "@/api/httpClient";
+import { FilterBar } from "@/components/layout/FilterBar";
+import { MetricCard } from "@/components/layout/MetricCard";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionCard } from "@/components/layout/SectionCard";
 
 export const GroupFundPage = () => {
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
@@ -58,6 +63,7 @@ export const GroupFundPage = () => {
   });
 
   const transactionType = watch("transactionType");
+  const transactionOptions = Object.entries(groupFundTransactionLabels).map(([value, label]) => ({ value, label }));
 
   const loading = summaryQuery.isLoading || ledgerQuery.isLoading || matchesQuery.isLoading || transactionsQuery.isLoading;
   const hasError = summaryQuery.isError || ledgerQuery.isError || matchesQuery.isError || transactionsQuery.isError;
@@ -79,20 +85,27 @@ export const GroupFundPage = () => {
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-bold">Group Fund</h2>
-        <div className="hidden gap-2 md:flex">
-          <Button onClick={() => setTransactionOpen(true)}>Manual transaction</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuickOpen(true)}>
-            Quick add match
-          </Button>
-        </div>
-      </div>
+  const totalObligation = (summaryQuery.data?.players ?? []).reduce((sum, player) => sum + player.currentObligationVnd, 0);
 
-      <Card>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  return (
+    <PageContainer>
+      <PageHeader
+        title="Group Fund"
+        subtitle="Track fund health, obligations, and manual adjustments."
+        actions={
+          <>
+            <Button className="hidden md:inline-flex" onClick={() => setTransactionOpen(true)}>
+              Manual transaction
+            </Button>
+            <Button className="hidden md:inline-flex" type="primary" icon={<PlusOutlined />} onClick={() => setQuickOpen(true)}>
+              Quick add match
+            </Button>
+          </>
+        }
+      />
+
+      <FilterBar>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,220px)_minmax(0,220px)_auto] md:items-center">
           <DatePicker
             className="w-full"
             placeholder="From date"
@@ -105,125 +118,150 @@ export const GroupFundPage = () => {
             value={to ? dayjs(to) : null}
             onChange={(value) => setTo(value ? value.toISOString() : undefined)}
           />
+          <div className="md:justify-self-end">
+            <Button
+              onClick={() => {
+                setFrom(undefined);
+                setTo(undefined);
+                setPage(1);
+              }}
+            >
+              Clear filters
+            </Button>
+          </div>
         </div>
-      </Card>
+      </FilterBar>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <Card>
-          <div className="text-xs text-slate-500">Fund balance</div>
-          <div className="text-2xl font-bold">{formatVnd(summaryQuery.data?.fundBalanceVnd ?? 0)}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-slate-500">Total matches</div>
-          <div className="text-2xl font-bold">{summaryQuery.data?.totalMatches ?? 0}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-slate-500">Current obligations</div>
-          <div className="text-sm text-slate-700">{(summaryQuery.data?.players ?? []).reduce((sum, player) => sum + player.currentObligationVnd, 0).toLocaleString("vi-VN")} ?</div>
-        </Card>
-      </div>
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <MetricCard label="Fund balance" value={formatVnd(summaryQuery.data?.fundBalanceVnd ?? 0)} />
+        <MetricCard label="Total matches" value={summaryQuery.data?.totalMatches ?? 0} />
+        <MetricCard label="Current obligations" value={formatVnd(totalObligation)} hint="Outstanding obligations across all players" />
+      </section>
 
-      <Card title="Per-player contribution / obligation">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {(summaryQuery.data?.players ?? []).map((player) => (
-            <div key={player.playerId} className="rounded-xl bg-slate-50 p-3 text-sm">
-              <div className="font-medium">{player.playerName}</div>
-              <div>Contributed: {formatVnd(player.totalContributedVnd)}</div>
-              <div>Obligation: {formatVnd(player.currentObligationVnd)}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Tabs
-        items={[
-          {
-            key: "ledger",
-            label: "Fund Ledger",
-            children:
-              (ledgerQuery.data?.data ?? []).length === 0 ? (
-                <EmptyState title="No ledger entries" />
-              ) : (
-                <div className="space-y-3">
-                  {(ledgerQuery.data?.data ?? []).map((entry) => (
-                    <button
-                      key={entry.entryId}
-                      className="focus-ring w-full rounded-2xl border border-slate-200 p-3 text-left"
-                      onClick={() => entry.matchId && setSelectedMatchId(entry.matchId)}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs text-slate-500">{formatDateTime(entry.postedAt)}</div>
-                        <Tag color={entry.movementType === "FUND_IN" ? "green" : "red"}>{entry.movementType}</Tag>
-                      </div>
-                      <div className="mt-1 text-sm font-medium">{entry.relatedPlayerName || "System"}</div>
-                      <div className="text-sm">{formatVnd(entry.amountVnd)}</div>
-                      <div className="mt-1 text-xs text-slate-500">{entry.entryReason}</div>
-                    </button>
-                  ))}
-                  <div className="flex justify-center">
-                    <Pagination
-                      current={ledgerQuery.data?.meta?.page ?? page}
-                      pageSize={ledgerQuery.data?.meta?.pageSize ?? 12}
-                      total={ledgerQuery.data?.meta?.total ?? 0}
-                      showSizeChanger={false}
-                      onChange={setPage}
-                    />
+      <SectionCard
+        title="Per-player contribution and obligation"
+        description="Contribution totals and current obligation state per player"
+      >
+        {(summaryQuery.data?.players ?? []).length === 0 ? (
+          <EmptyState title="No player contribution data" />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {(summaryQuery.data?.players ?? []).map((player) => (
+              <div key={player.playerId} className="rounded-xl border border-slate-200 bg-slate-50/90 p-3.5">
+                <div className="text-sm font-semibold text-slate-900">{player.playerName}</div>
+                <div className="mt-3 space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Contributed</span>
+                    <span className="font-medium text-slate-800">{formatVnd(player.totalContributedVnd)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">Obligation</span>
+                    <span className="font-medium text-slate-800">{formatVnd(player.currentObligationVnd)}</span>
                   </div>
                 </div>
-              )
-          },
-          {
-            key: "matches",
-            label: "Match History",
-            children:
-              (matchesQuery.data?.data ?? []).length === 0 ? (
-                <EmptyState title="No matches" />
-              ) : (
-                <List
-                  dataSource={matchesQuery.data?.data ?? []}
-                  renderItem={(item) => (
-                    <List.Item className="!px-0">
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="History" description="Ledger movements, matches, and manual transactions">
+        <Tabs
+          items={[
+            {
+              key: "ledger",
+              label: "Fund Ledger",
+              children:
+                (ledgerQuery.data?.data ?? []).length === 0 ? (
+                  <EmptyState title="No ledger entries" />
+                ) : (
+                  <div className="space-y-3">
+                    {(ledgerQuery.data?.data ?? []).map((entry) => (
                       <button
-                        className="focus-ring w-full rounded-2xl border border-slate-200 p-3 text-left"
-                        onClick={() => setSelectedMatchId(item.id)}
+                        key={entry.entryId}
+                        className="focus-ring w-full rounded-xl border border-slate-200/90 bg-white p-3 text-left transition hover:border-brand-500"
+                        onClick={() => entry.matchId && setSelectedMatchId(entry.matchId)}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">{formatDateTime(item.playedAt)}</span>
-                          <Tag>{`v${item.ruleSetVersionNo}`}</Tag>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-slate-500">{formatDateTime(entry.postedAt)}</div>
+                          <Tag color={entry.movementType === "FUND_IN" ? "green" : "red"}>{entry.movementType}</Tag>
                         </div>
-                        <div className="text-xs text-slate-500">{item.ruleSetName}</div>
-                        <div className="mt-1 text-xs">{item.participants.map((participant) => `${participant.playerName} #${participant.tftPlacement}`).join(" | ")}</div>
-                        <div className="mt-1 text-xs text-slate-500">Fund in/out: {formatVnd(item.totalFundInVnd)} / {formatVnd(item.totalFundOutVnd)}</div>
+                        <div className="mt-1 text-sm font-medium">{entry.relatedPlayerName || "System"}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-800">{formatVnd(entry.amountVnd)}</div>
+                        <div className="mt-1 text-xs text-slate-500">{entry.entryReason}</div>
                       </button>
-                    </List.Item>
-                  )}
-                />
-              )
-          },
-          {
-            key: "transactions",
-            label: "Manual Transactions",
-            children:
-              (transactionsQuery.data?.data ?? []).length === 0 ? (
-                <EmptyState title="No manual transactions" actionLabel="Create transaction" onAction={() => setTransactionOpen(true)} />
-              ) : (
-                <div className="space-y-3">
-                  <Button onClick={() => setTransactionOpen(true)}>Create manual transaction</Button>
-                  {(transactionsQuery.data?.data ?? []).map((txn) => (
-                    <div key={txn.entryId} className="rounded-2xl border border-slate-200 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <Tag>{groupFundTransactionLabels[txn.transactionType]}</Tag>
-                        <span className="text-sm font-semibold">{formatVnd(txn.amountVnd)}</span>
-                      </div>
-                      <div className="mt-1 text-sm">{txn.playerName || "N/A"}</div>
-                      <div className="mt-1 text-xs text-slate-500">{txn.reason}</div>
+                    ))}
+                    <div className="flex justify-center pt-1">
+                      <Pagination
+                        current={ledgerQuery.data?.meta?.page ?? page}
+                        pageSize={ledgerQuery.data?.meta?.pageSize ?? 12}
+                        total={ledgerQuery.data?.meta?.total ?? 0}
+                        showSizeChanger={false}
+                        onChange={setPage}
+                      />
                     </div>
-                  ))}
-                </div>
-              )
-          }
-        ]}
-      />
+                  </div>
+                )
+            },
+            {
+              key: "matches",
+              label: "Match History",
+              children:
+                (matchesQuery.data?.data ?? []).length === 0 ? (
+                  <EmptyState title="No matches" />
+                ) : (
+                  <List
+                    dataSource={matchesQuery.data?.data ?? []}
+                    renderItem={(item) => (
+                      <List.Item className="!px-0">
+                        <button
+                          className="focus-ring w-full rounded-xl border border-slate-200/90 bg-white p-3 text-left transition hover:border-brand-500"
+                          onClick={() => setSelectedMatchId(item.id)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{formatDateTime(item.playedAt)}</span>
+                            <Tag>{`v${item.ruleSetVersionNo}`}</Tag>
+                          </div>
+                          <div className="text-xs text-slate-500">{item.ruleSetName}</div>
+                          <div className="mt-1 text-xs text-slate-600">
+                            {item.participants.map((participant) => `${participant.playerName} #${participant.tftPlacement}`).join(" | ")}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Fund in/out: {formatVnd(item.totalFundInVnd)} / {formatVnd(item.totalFundOutVnd)}
+                          </div>
+                        </button>
+                      </List.Item>
+                    )}
+                  />
+                )
+            },
+            {
+              key: "transactions",
+              label: "Manual Transactions",
+              children:
+                (transactionsQuery.data?.data ?? []).length === 0 ? (
+                  <EmptyState title="No manual transactions" actionLabel="Create transaction" onAction={() => setTransactionOpen(true)} />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button onClick={() => setTransactionOpen(true)}>Create manual transaction</Button>
+                    </div>
+                    {(transactionsQuery.data?.data ?? []).map((txn) => (
+                      <div key={txn.entryId} className="rounded-xl border border-slate-200/90 bg-white p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <Tag>{groupFundTransactionLabels[txn.transactionType]}</Tag>
+                          <span className="text-sm font-semibold">{formatVnd(txn.amountVnd)}</span>
+                        </div>
+                        <div className="mt-1 text-sm text-slate-700">{txn.playerName || "N/A"}</div>
+                        <div className="mt-1 text-xs text-slate-500">{txn.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )
+            }
+          ]}
+        />
+      </SectionCard>
 
       <Button
         type="primary"
@@ -238,12 +276,7 @@ export const GroupFundPage = () => {
       <QuickMatchEntry open={quickOpen} module="GROUP_FUND" onClose={() => setQuickOpen(false)} />
       <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
 
-      <Drawer
-        title="Manual Group Fund Transaction"
-        open={transactionOpen}
-        onClose={() => setTransactionOpen(false)}
-        width={460}
-      >
+      <Drawer title="Manual Group Fund Transaction" open={transactionOpen} onClose={() => setTransactionOpen(false)} width={460}>
         <form
           className="space-y-4"
           onSubmit={handleSubmit(async (values) => {
@@ -277,12 +310,7 @@ export const GroupFundPage = () => {
               control={control}
               name="transactionType"
               render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onChange={field.onChange}
-                  options={Object.entries(groupFundTransactionLabels).map(([value, label]) => ({ value, label }))}
-                  size="large"
-                />
+                <Select value={field.value} onChange={field.onChange} options={transactionOptions} size="large" />
               )}
             />
           </div>
@@ -342,6 +370,6 @@ export const GroupFundPage = () => {
           </Button>
         </form>
       </Drawer>
-    </div>
+    </PageContainer>
   );
 };

@@ -1,15 +1,31 @@
 import { useState } from "react";
-import { Button, Card, Input, Switch, message } from "antd";
+import { Alert, Button, Card, DatePicker, Input, Switch, message } from "antd";
+import dayjs from "dayjs";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
 import { useRuleSetVersionDetail, useUpdateRuleSetVersion } from "@/features/rules/hooks";
-import { ruleSetVersionMetaSchema, parseJsonOrDefault, type RuleSetVersionMetaValues } from "@/features/rules/schemas";
-import { PageLoading } from "@/components/states/PageLoading";
-import { ErrorState } from "@/components/states/ErrorState";
+import { parseJsonOrDefault, ruleSetVersionMetaSchema, type RuleSetVersionMetaValues } from "@/features/rules/schemas";
 import { FormApiError } from "@/components/common/FormApiError";
+import { ErrorState } from "@/components/states/ErrorState";
+import { PageLoading } from "@/components/states/PageLoading";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { getErrorMessage } from "@/lib/error-messages";
 import { toAppError } from "@/api/httpClient";
+
+const parseRecordJson = (value?: string | null): Record<string, unknown> | null => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = parseJsonOrDefault(value, null);
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+
+  return null;
+};
 
 export const RuleSetVersionEditPage = () => {
   const navigate = useNavigate();
@@ -41,8 +57,16 @@ export const RuleSetVersionEditPage = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">Edit Version Metadata</h2>
+    <PageContainer>
+      <PageHeader title="Edit Version Metadata" subtitle={`v${detailQuery.data.versionNo} (${detailQuery.data.builderType || "RAW"})`} />
+
+      <Alert
+        showIcon
+        type="info"
+        message="Metadata-only update"
+        description="This endpoint updates only version metadata (active flag, effective end time, summary JSON). Rule logic body is immutable."
+      />
+
       <Card>
         <form
           className="space-y-4"
@@ -52,7 +76,7 @@ export const RuleSetVersionEditPage = () => {
               await updateMutation.mutateAsync({
                 isActive: values.isActive,
                 effectiveTo: values.effectiveTo || null,
-                summaryJson: parseJsonOrDefault(values.summaryJsonText, null) as Record<string, unknown> | null
+                summaryJson: parseRecordJson(values.summaryJsonText)
               });
               message.success("Version metadata updated");
               navigate(`/rules/${ruleSetId}/versions/${versionId}`);
@@ -69,8 +93,19 @@ export const RuleSetVersionEditPage = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">Effective to (ISO or empty)</label>
-            <Controller control={form.control} name="effectiveTo" render={({ field }) => <Input {...field} placeholder="2026-12-31T23:59:59Z" />} />
+            <label className="mb-1 block text-sm font-medium">Effective to (optional)</label>
+            <Controller
+              control={form.control}
+              name="effectiveTo"
+              render={({ field }) => (
+                <DatePicker
+                  className="w-full"
+                  showTime
+                  value={field.value ? dayjs(field.value) : null}
+                  onChange={(value) => field.onChange(value ? value.toISOString() : "")}
+                />
+              )}
+            />
             {form.formState.errors.effectiveTo ? <div className="mt-1 text-xs text-red-600">{form.formState.errors.effectiveTo.message}</div> : null}
           </div>
 
@@ -87,6 +122,6 @@ export const RuleSetVersionEditPage = () => {
           </Button>
         </form>
       </Card>
-    </div>
+    </PageContainer>
   );
 };

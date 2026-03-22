@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Card, Input, Select, Switch } from "antd";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { ModuleType } from "@/types/api";
 import type { RuleSetDto } from "@/types/api";
 import { ruleSetMetaSchema, type RuleSetMetaValues } from "@/features/rules/schemas";
 import { FormApiError } from "@/components/common/FormApiError";
@@ -10,12 +11,14 @@ import { getErrorMessage } from "@/lib/error-messages";
 
 interface RuleSetMetaFormProps {
   initial?: RuleSetDto;
+  initialModule?: ModuleType;
+  lockModule?: boolean;
   submitLabel: string;
   submitting?: boolean;
   onSubmit: (values: RuleSetMetaValues) => Promise<void>;
 }
 
-export const RuleSetMetaForm = ({ initial, submitLabel, submitting, onSubmit }: RuleSetMetaFormProps) => {
+export const RuleSetMetaForm = ({ initial, initialModule, lockModule, submitLabel, submitting, onSubmit }: RuleSetMetaFormProps) => {
   const [apiError, setApiError] = useState<string | null>(null);
   const {
     control,
@@ -26,7 +29,7 @@ export const RuleSetMetaForm = ({ initial, submitLabel, submitting, onSubmit }: 
   } = useForm<RuleSetMetaValues>({
     resolver: zodResolver(ruleSetMetaSchema),
     defaultValues: {
-      module: initial?.module ?? "MATCH_STAKES",
+      module: initial?.module ?? initialModule ?? "MATCH_STAKES",
       code: initial?.code ?? "",
       name: initial?.name ?? "",
       description: initial?.description ?? "",
@@ -86,7 +89,7 @@ export const RuleSetMetaForm = ({ initial, submitLabel, submitting, onSubmit }: 
                     { label: "Group Fund", value: "GROUP_FUND" }
                   ]}
                   size="large"
-                  disabled={Boolean(initial)}
+                  disabled={Boolean(initial) || Boolean(lockModule)}
                 />
               )}
             />

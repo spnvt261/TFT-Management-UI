@@ -1,7 +1,7 @@
 import { Button, Card, Collapse, Input, InputNumber, Select, Switch } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Controller, useFieldArray, useFormContext } from "react-hook-form";
-import type { RuleSetVersionValues } from "@/features/rules/schemas";
+import type { RawRuleSetVersionValues } from "@/features/rules/schemas";
 import { ruleKindLabels } from "@/lib/labels";
 
 const conditionKeys = [
@@ -38,7 +38,7 @@ const RuleItemEditor = ({ index, onRemove }: RuleItemEditorProps) => {
   const {
     control,
     formState: { errors }
-  } = useFormContext<RuleSetVersionValues>();
+  } = useFormContext<RawRuleSetVersionValues>();
 
   const conditionArray = useFieldArray({
     control,
@@ -273,7 +273,7 @@ const RuleItemEditor = ({ index, onRemove }: RuleItemEditorProps) => {
 };
 
 export const RuleBuilder = () => {
-  const { control } = useFormContext<RuleSetVersionValues>();
+  const { control } = useFormContext<RawRuleSetVersionValues>();
   const ruleArray = useFieldArray({
     control,
     name: "rules"

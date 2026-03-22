@@ -1,4 +1,4 @@
-import { Card, List, Typography } from "antd";
+import { List, Typography } from "antd";
 import { useState } from "react";
 import { useDashboardOverview } from "@/features/dashboard/hooks";
 import { PageLoading } from "@/components/states/PageLoading";
@@ -6,6 +6,10 @@ import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
+import { MetricCard } from "@/components/layout/MetricCard";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SectionCard } from "@/components/layout/SectionCard";
 
 export const DashboardPage = () => {
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
@@ -25,28 +29,18 @@ export const DashboardPage = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <div className="text-xs text-slate-500">Players</div>
-          <div className="text-2xl font-bold">{data.playerCount}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-slate-500">Total matches</div>
-          <div className="text-2xl font-bold">{data.totalMatches}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-slate-500">Match Stakes matches</div>
-          <div className="text-2xl font-bold">{data.matchStakes.totalMatches}</div>
-        </Card>
-        <Card>
-          <div className="text-xs text-slate-500">Group Fund balance</div>
-          <div className="text-2xl font-bold">{formatVnd(data.groupFund.fundBalanceVnd)}</div>
-        </Card>
+    <PageContainer>
+      <PageHeader title="Dashboard" subtitle="Quick overview of players, modules, and latest matches." />
+
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Players" value={data.playerCount} />
+        <MetricCard label="Total matches" value={data.totalMatches} />
+        <MetricCard label="Match Stakes matches" value={data.matchStakes.totalMatches} />
+        <MetricCard label="Group Fund balance" value={formatVnd(data.groupFund.fundBalanceVnd)} />
       </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title="Top Match Stakes Players">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <SectionCard title="Top Match Stakes Players" description="Highest net balance performers">
           <List
             dataSource={data.matchStakes.topPlayers}
             locale={{ emptyText: "No data" }}
@@ -59,9 +53,9 @@ export const DashboardPage = () => {
               </List.Item>
             )}
           />
-        </Card>
+        </SectionCard>
 
-        <Card title="Top Contributors">
+        <SectionCard title="Top Contributors" description="Largest Group Fund contributors">
           <List
             dataSource={data.groupFund.topContributors}
             locale={{ emptyText: "No data" }}
@@ -74,10 +68,10 @@ export const DashboardPage = () => {
               </List.Item>
             )}
           />
-        </Card>
+        </SectionCard>
       </section>
 
-      <Card title="Recent Matches">
+      <SectionCard title="Recent Matches" description="Tap any item to view full match detail">
         {data.recentMatches.length === 0 ? (
           <EmptyState title="No recent matches" />
         ) : (
@@ -86,17 +80,19 @@ export const DashboardPage = () => {
             renderItem={(match) => (
               <List.Item className="!px-0">
                 <button
-                  className="focus-ring w-full rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-brand-500"
+                  className="focus-ring w-full rounded-xl border border-slate-200/90 bg-white p-3 text-left transition hover:border-brand-500"
                   onClick={() => setSelectedMatchId(match.id)}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <Typography.Text strong>{match.ruleSetName}</Typography.Text>
                     <Typography.Text type="secondary" className="text-xs">
                       {formatDateTime(match.playedAt)}
                     </Typography.Text>
                   </div>
-                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                    <span>{match.participants.map((participant) => `${participant.playerName} #${participant.tftPlacement}`).join(" | ")}</span>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                    <span className="truncate">
+                      {match.participants.map((participant) => `${participant.playerName} #${participant.tftPlacement}`).join(" | ")}
+                    </span>
                     <span>{formatVnd(match.totalTransferVnd)}</span>
                   </div>
                 </button>
@@ -104,9 +100,9 @@ export const DashboardPage = () => {
             )}
           />
         )}
-      </Card>
+      </SectionCard>
 
       <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
-    </div>
+    </PageContainer>
   );
 };

@@ -2,8 +2,10 @@ import { message } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { RuleSetMetaForm } from "@/features/rules/RuleSetMetaForm";
 import { useRuleSetDetail, useUpdateRuleSet } from "@/features/rules/hooks";
-import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
+import { PageLoading } from "@/components/states/PageLoading";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
 import type { RuleSetMetaValues } from "@/features/rules/schemas";
 
 export const RuleSetEditPage = () => {
@@ -33,14 +35,14 @@ export const RuleSetEditPage = () => {
       isDefault: values.isDefault
     });
 
-    message.success("Rule set updated");
+    message.success("Rule set metadata updated");
     navigate(`/rules/${ruleSetId}`);
   };
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">Edit Rule Set</h2>
-      <RuleSetMetaForm initial={detailQuery.data} submitLabel="Save changes" submitting={updateMutation.isPending} onSubmit={onSubmit} />
-    </div>
+    <PageContainer>
+      <PageHeader title="Edit Rule Set Metadata" subtitle={`${detailQuery.data.code} - ${detailQuery.data.name}`} />
+      <RuleSetMetaForm initial={detailQuery.data} submitLabel="Save metadata" submitting={updateMutation.isPending} onSubmit={onSubmit} />
+    </PageContainer>
   );
 };

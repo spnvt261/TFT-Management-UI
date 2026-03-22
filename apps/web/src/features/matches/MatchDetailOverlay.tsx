@@ -63,7 +63,7 @@ export const MatchDetailOverlay = ({ matchId, open, onClose }: MatchDetailOverla
           width="100%"
           open={open}
           onClose={onClose}
-          destroyOnClose
+          destroyOnHidden
           extra={<Button onClick={onClose}>Close</Button>}
         >
           {content}
@@ -75,7 +75,7 @@ export const MatchDetailOverlay = ({ matchId, open, onClose }: MatchDetailOverla
           width={680}
           open={open}
           onClose={onClose}
-          destroyOnClose
+          destroyOnHidden
           extra={<Button onClick={onClose}>Close</Button>}
         >
           {content}

@@ -39,6 +39,7 @@ export type RuleKind =
   | "PAIR_CONDITION_MODIFIER"
   | "FUND_CONTRIBUTION"
   | "CUSTOM";
+export type RuleBuilderType = "MATCH_STAKES_PAYOUT";
 
 export type ConditionOperator =
   | "EQ"
@@ -63,6 +64,12 @@ export type SelectorType =
   | "FUND_ACCOUNT"
   | "SYSTEM_ACCOUNT"
   | "FIXED_PLAYER";
+
+export type MatchStakesPenaltyDestinationSelectorType =
+  | "BEST_PARTICIPANT"
+  | "MATCH_WINNER"
+  | "FIXED_PLAYER"
+  | "FUND_ACCOUNT";
 
 export interface PlayerDto {
   id: string;
@@ -178,6 +185,8 @@ export interface RuleSetVersionListItemDto {
   effectiveTo: string | null;
   isActive: boolean;
   summaryJson: unknown;
+  builderType: string | null;
+  builderConfig: unknown | null;
   createdAt: string;
   rules: [];
 }
@@ -250,6 +259,8 @@ export interface RuleSetVersionDetailDto {
   effectiveTo: string | null;
   isActive: boolean;
   summaryJson: unknown;
+  builderType: string | null;
+  builderConfig: unknown | null;
   createdAt: string;
   rules: RuleDto[];
 }
@@ -267,38 +278,60 @@ export type RuleConditionKey =
 
 export type RuleActionType = "TRANSFER" | "POST_TO_FUND" | "CREATE_OBLIGATION" | "REDUCE_OBLIGATION";
 
+export interface RuleInput {
+  code: string;
+  name: string;
+  description?: string | null;
+  ruleKind: RuleKind;
+  priority?: number;
+  status?: RuleStatus;
+  stopProcessingOnMatch?: boolean;
+  metadata?: Record<string, unknown> | null;
+  conditions: Array<{
+    conditionKey: RuleConditionKey;
+    operator: ConditionOperator;
+    valueJson: unknown;
+    sortOrder?: number;
+  }>;
+  actions: Array<{
+    actionType: RuleActionType;
+    amountVnd: number;
+    sourceSelectorType: SelectorType;
+    sourceSelectorJson?: unknown;
+    destinationSelectorType: SelectorType;
+    destinationSelectorJson?: unknown;
+    descriptionTemplate?: string | null;
+    sortOrder?: number;
+  }>;
+}
+
+export interface MatchStakesPenaltyConfig {
+  absolutePlacement: number;
+  amountVnd: number;
+  destinationSelectorType?: MatchStakesPenaltyDestinationSelectorType;
+  destinationSelectorJson?: Record<string, unknown> | null;
+  code?: string;
+  name?: string;
+  description?: string | null;
+}
+
+export interface MatchStakesBuilderConfig {
+  participantCount: 3 | 4;
+  winnerCount: number;
+  payouts: Array<{ relativeRank: number; amountVnd: number }>;
+  losses: Array<{ relativeRank: number; amountVnd: number }>;
+  penalties?: MatchStakesPenaltyConfig[];
+}
+
 export interface CreateRuleSetVersionRequest {
   participantCountMin: number;
   participantCountMax: number;
   effectiveTo?: string | null;
   isActive?: boolean;
   summaryJson?: Record<string, unknown> | null;
-  rules: Array<{
-    code: string;
-    name: string;
-    description?: string | null;
-    ruleKind: RuleKind;
-    priority?: number;
-    status?: RuleStatus;
-    stopProcessingOnMatch?: boolean;
-    metadata?: Record<string, unknown> | null;
-    conditions: Array<{
-      conditionKey: RuleConditionKey;
-      operator: ConditionOperator;
-      valueJson: unknown;
-      sortOrder?: number;
-    }>;
-    actions: Array<{
-      actionType: RuleActionType;
-      amountVnd: number;
-      sourceSelectorType: SelectorType;
-      sourceSelectorJson?: unknown;
-      destinationSelectorType: SelectorType;
-      destinationSelectorJson?: unknown;
-      descriptionTemplate?: string | null;
-      sortOrder?: number;
-    }>;
-  }>;
+  builderType?: RuleBuilderType | null;
+  builderConfig?: MatchStakesBuilderConfig | null;
+  rules?: RuleInput[];
 }
 
 export interface UpdateRuleSetVersionRequest {

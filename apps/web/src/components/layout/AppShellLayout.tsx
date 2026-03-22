@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Layout, Drawer, Button } from "antd";
+import { Drawer, Button } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@/lib/cn";
@@ -16,7 +16,7 @@ const NavContent = ({ onNavigate }: { onNavigate?: () => void }) => {
   const location = useLocation();
 
   return (
-    <nav className="space-y-1">
+    <nav className="space-y-1.5">
       {navItems.map((item) => {
         const active = location.pathname.startsWith(item.to);
 
@@ -26,8 +26,10 @@ const NavContent = ({ onNavigate }: { onNavigate?: () => void }) => {
             to={item.to}
             onClick={onNavigate}
             className={cn(
-              "block rounded-xl px-3 py-2 text-sm font-medium transition",
-              active ? "bg-brand-100 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              "block rounded-xl px-3.5 py-2.5 text-sm font-medium transition",
+              active
+                ? "bg-brand-100 text-brand-700 shadow-[inset_0_0_0_1px_rgba(22,163,74,0.2)]"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             )}
           >
             {item.label}
@@ -42,26 +44,29 @@ export const AppShellLayout = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <Layout className="min-h-screen bg-transparent">
-      <aside className="hidden w-64 border-r border-slate-200 bg-white/80 p-5 backdrop-blur lg:block">
-        <h1 className="mb-6 text-lg font-bold text-slate-900">TFT History</h1>
+    <div className="min-h-screen bg-transparent lg:flex">
+      <aside className="sticky top-0 hidden h-screen w-[280px] border-r border-slate-200/80 bg-white/90 px-5 py-6 backdrop-blur lg:block">
+        <div className="mb-6 border-b border-slate-200/80 pb-5">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-700">TFT2</div>
+          <h1 className="mt-2 text-xl font-bold tracking-tight text-slate-900">History Manager</h1>
+        </div>
         <NavContent />
       </aside>
 
-      <Layout.Content className="flex-1 p-4 sm:p-6">
+      <div className="min-w-0 flex-1 px-3 pb-8 pt-3 sm:px-4 sm:pt-4 lg:px-7 lg:pt-6 xl:px-8">
         <header className="mb-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 backdrop-blur lg:hidden">
           <h1 className="text-base font-semibold">TFT History</h1>
           <Button aria-label="Open navigation" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />
         </header>
 
-        <main className="mx-auto w-full max-w-7xl pb-20 lg:pb-10">
+        <main className="w-full pb-20 lg:pb-10">
           <Outlet />
         </main>
-      </Layout.Content>
+      </div>
 
       <Drawer open={drawerOpen} title="Navigation" placement="left" onClose={() => setDrawerOpen(false)}>
         <NavContent onNavigate={() => setDrawerOpen(false)} />
       </Drawer>
-    </Layout>
+    </div>
   );
 };

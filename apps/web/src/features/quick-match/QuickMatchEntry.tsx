@@ -408,11 +408,11 @@ export const QuickMatchEntry = ({ open, module, onClose }: QuickMatchEntryProps)
   );
 
   return isMobile ? (
-    <Drawer title={`Quick Match - ${moduleLabels[module]}`} placement="bottom" height="95%" open={open} onClose={onClose} destroyOnClose>
+    <Drawer title={`Quick Match - ${moduleLabels[module]}`} placement="bottom" height="95%" open={open} onClose={onClose} destroyOnHidden>
       {formContent}
     </Drawer>
   ) : (
-    <Modal title={`Quick Match - ${moduleLabels[module]}`} open={open} onCancel={onClose} footer={null} width={900} destroyOnClose>
+    <Modal title={`Quick Match - ${moduleLabels[module]}`} open={open} onCancel={onClose} footer={null} width={900} destroyOnHidden>
       {formContent}
     </Modal>
   );

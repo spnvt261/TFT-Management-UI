@@ -59,6 +59,19 @@ export const useCreateRuleSetVersion = (ruleSetId: string) => {
   });
 };
 
+export const useCreateRuleSetVersionById = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ ruleSetId, payload }: { ruleSetId: string; payload: CreateRuleSetVersionRequest }) =>
+      rulesApi.createVersion(ruleSetId, payload),
+    onSuccess: async (_, variables) => {
+      await invalidateAfterRuleMutation(queryClient);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.rules.detail(variables.ruleSetId) });
+    }
+  });
+};
+
 export const useUpdateRuleSetVersion = (ruleSetId: string, versionId: string) => {
   const queryClient = useQueryClient();
 
