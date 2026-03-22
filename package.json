@@ -1,0 +1,12 @@
+{
+  "name": "tft2-ui",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev": "pnpm --filter @tft2/web dev",
+    "build": "pnpm --filter @tft2/web build",
+    "test": "pnpm --filter @tft2/web test",
+    "test:run": "pnpm --filter @tft2/web test:run"
+  }
+}

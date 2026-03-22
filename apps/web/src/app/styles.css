@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-brand-50: 240 253 244;
+  --color-brand-100: 220 252 231;
+  --color-brand-500: 22 163 74;
+  --color-brand-700: 21 128 61;
+  --surface-bg: 247 249 252;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 0 0, rgb(var(--color-brand-100) / 0.35), transparent 45%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  color: #111827;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Keep Antd styles predictable; avoid deep global component overrides. */
+.ant-typography,
+.ant-btn,
+.ant-input,
+.ant-select,
+.ant-tabs {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid #16a34a;
+  outline-offset: 2px;
+}

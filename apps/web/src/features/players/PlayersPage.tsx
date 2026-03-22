@@ -1,0 +1,142 @@
+import { useMemo, useState } from "react";
+import { Button, Card, Input, Pagination, Segmented, Tag } from "antd";
+import { Link, useNavigate } from "react-router-dom";
+import { useDeactivatePlayer, usePlayers, useUpdatePlayer } from "@/features/players/hooks";
+import { PageLoading } from "@/components/states/PageLoading";
+import { ErrorState } from "@/components/states/ErrorState";
+import { EmptyState } from "@/components/states/EmptyState";
+import { ConfirmDanger } from "@/components/common/ConfirmDanger";
+import type { PlayerDto } from "@/types/api";
+
+export const PlayersPage = () => {
+  const [search, setSearch] = useState("");
+  const [isActiveFilter, setIsActiveFilter] = useState<"all" | "active" | "inactive">("active");
+  const [page, setPage] = useState(1);
+  const [targetPlayer, setTargetPlayer] = useState<PlayerDto | null>(null);
+  const navigate = useNavigate();
+
+  const query = useMemo(
+    () => ({
+      page,
+      pageSize: 12,
+      search: search || undefined,
+      isActive: isActiveFilter === "all" ? undefined : isActiveFilter === "active"
+    }),
+    [search, isActiveFilter, page]
+  );
+
+  const playersQuery = usePlayers(query);
+  const deactivateMutation = useDeactivatePlayer();
+  const reactivateMutation = useUpdatePlayer(targetPlayer?.id ?? "");
+
+  if (playersQuery.isLoading) {
+    return <PageLoading label="Loading players..." />;
+  }
+
+  if (playersQuery.isError) {
+    return <ErrorState onRetry={() => void playersQuery.refetch()} />;
+  }
+
+  const players = playersQuery.data?.data ?? [];
+  const meta = playersQuery.data?.meta;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-bold">Players</h2>
+        <Button type="primary" onClick={() => navigate("/players/new")}>New Player</Button>
+      </div>
+
+      <Card>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+          <Input
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search players"
+            allowClear
+          />
+          <Segmented
+            value={isActiveFilter}
+            options={[
+              { label: "Active", value: "active" },
+              { label: "Inactive", value: "inactive" },
+              { label: "All", value: "all" }
+            ]}
+            onChange={(value) => {
+              setIsActiveFilter(value as typeof isActiveFilter);
+              setPage(1);
+            }}
+          />
+        </div>
+      </Card>
+
+      {players.length === 0 ? (
+        <EmptyState title="No players found" description="Try changing search or filters." />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {players.map((player) => (
+            <Card key={player.id} className="!rounded-2xl">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold">{player.displayName}</div>
+                  <Tag color={player.isActive ? "green" : "default"}>{player.isActive ? "Active" : "Inactive"}</Tag>
+                </div>
+
+                <div className="text-xs text-slate-500">Slug: {player.slug ?? "-"}</div>
+
+                <div className="flex gap-2">
+                  <Button block onClick={() => navigate(`/players/${player.id}/edit`)}>Edit</Button>
+                  {player.isActive ? (
+                    <Button block danger onClick={() => setTargetPlayer(player)}>Deactivate</Button>
+                  ) : (
+                    <Button
+                      block
+                      type="primary"
+                      loading={reactivateMutation.isPending && targetPlayer?.id === player.id}
+                      onClick={async () => {
+                        setTargetPlayer(player);
+                        await reactivateMutation.mutateAsync({ isActive: true });
+                        setTargetPlayer(null);
+                      }}
+                    >
+                      Reactivate
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div className="flex justify-center">
+        <Pagination
+          current={meta?.page ?? page}
+          pageSize={meta?.pageSize ?? 12}
+          total={meta?.total ?? players.length}
+          onChange={setPage}
+          showSizeChanger={false}
+        />
+      </div>
+
+      <ConfirmDanger
+        open={Boolean(targetPlayer?.isActive)}
+        title="Deactivate player?"
+        description={`This will mark ${targetPlayer?.displayName ?? "player"} as inactive and hide them from quick-entry choices.`}
+        confirmText="Deactivate"
+        loading={deactivateMutation.isPending}
+        onCancel={() => setTargetPlayer(null)}
+        onConfirm={async () => {
+          if (!targetPlayer) {
+            return;
+          }
+          await deactivateMutation.mutateAsync(targetPlayer.id);
+          setTargetPlayer(null);
+        }}
+      />
+    </div>
+  );
+};
