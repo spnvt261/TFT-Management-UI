@@ -1,5 +1,6 @@
 import { Button, Card } from "antd";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { RulesBreadcrumb } from "@/features/rules/components";
 import { MatchStakesRuleCreateFlow } from "@/features/rules/MatchStakesRuleCreateFlow";
 import { GroupFundRuleCreateFlow } from "@/features/rules/GroupFundRuleCreateFlow";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -11,13 +12,33 @@ export const RuleSetCreatePage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const module = searchParams.get("module");
+  const selectedModuleLabel =
+    module === "MATCH_STAKES"
+      ? moduleLabels.MATCH_STAKES
+      : module === "GROUP_FUND"
+        ? moduleLabels.GROUP_FUND
+        : null;
+
+  const breadcrumbItems = [
+    { label: "Rules", to: "/rules" },
+    { label: "Create Rule", to: "/rules/new" },
+    ...(selectedModuleLabel ? [{ label: selectedModuleLabel }] : [])
+  ];
+
+  const cancelAction = (
+    <Button onClick={() => navigate("/rules")}>
+      Cancel
+    </Button>
+  );
 
   if (module === "MATCH_STAKES") {
     return (
       <PageContainer>
+        <RulesBreadcrumb items={breadcrumbItems} />
         <PageHeader
           title="Create Match Stakes Rule"
           subtitle="Configure a payout rule for 3 or 4 participants, including winners, losses, and special penalties."
+          actions={cancelAction}
         />
 
         <MatchStakesRuleCreateFlow />
@@ -28,9 +49,11 @@ export const RuleSetCreatePage = () => {
   if (module === "GROUP_FUND") {
     return (
       <PageContainer>
+        <RulesBreadcrumb items={breadcrumbItems} />
         <PageHeader
           title={`Create ${moduleLabels.GROUP_FUND} Rule`}
           subtitle="Configure contribution obligations and fund movements by participant rank."
+          actions={cancelAction}
         />
 
         <GroupFundRuleCreateFlow />
@@ -40,9 +63,11 @@ export const RuleSetCreatePage = () => {
 
   return (
     <PageContainer>
+      <RulesBreadcrumb items={breadcrumbItems} />
       <PageHeader
         title="Create Rule"
         subtitle="Choose a module to open the guided business-friendly rule creation flow."
+        actions={cancelAction}
       />
 
       <SectionCard title="Select Module" description="Pick the business flow you want to start">

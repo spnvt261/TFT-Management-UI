@@ -1,10 +1,11 @@
 import { message } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { RuleSetMetaForm } from "@/features/rules/RuleSetMetaForm";
+import { RulesBreadcrumb } from "@/features/rules/components";
 import { useRuleSetDetail, useUpdateRuleSet } from "@/features/rules/hooks";
 import { ErrorState } from "@/components/states/ErrorState";
 import { PageLoading } from "@/components/states/PageLoading";
-import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import type { RuleSetMetaValues } from "@/features/rules/schemas";
 
@@ -39,10 +40,34 @@ export const RuleSetEditPage = () => {
     navigate(`/rules/${ruleSetId}`);
   };
 
+  const handleCancel = () => {
+    navigate(`/rules/${ruleSetId}`);
+  };
+
   return (
     <PageContainer>
-      <PageHeader title="Edit Rule Set Metadata" subtitle={`${detailQuery.data.code} - ${detailQuery.data.name}`} />
-      <RuleSetMetaForm initial={detailQuery.data} submitLabel="Save metadata" submitting={updateMutation.isPending} onSubmit={onSubmit} />
+      <RulesBreadcrumb
+        items={[
+          { label: "Rules", to: "/rules" },
+          { label: detailQuery.data.name, to: `/rules/${ruleSetId}` },
+          { label: "Edit" }
+        ]}
+      />
+
+      <PageHeader
+        title="Edit Rule Set"
+        subtitle="Update business metadata for this rule set"
+      />
+
+      <div className="max-w-4xl">
+        <RuleSetMetaForm
+          initial={detailQuery.data}
+          submitLabel="Save changes"
+          submitting={updateMutation.isPending}
+          onCancel={handleCancel}
+          onSubmit={onSubmit}
+        />
+      </div>
     </PageContainer>
   );
 };

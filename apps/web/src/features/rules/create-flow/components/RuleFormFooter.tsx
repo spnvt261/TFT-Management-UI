@@ -15,9 +15,11 @@ export const RuleFormFooter = ({
   submitDisabled,
   cancelLabel = "Cancel"
 }: RuleFormFooterProps) => (
-  <div className="flex flex-wrap items-center justify-end gap-2">
-    <Button onClick={onCancel}>{cancelLabel}</Button>
-    <Button type="primary" htmlType="submit" loading={submitLoading} disabled={submitDisabled}>
+  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+    <Button className="w-full sm:w-auto" onClick={onCancel}>
+      {cancelLabel}
+    </Button>
+    <Button className="w-full sm:w-auto" type="primary" htmlType="submit" loading={submitLoading} disabled={submitDisabled}>
       {submitLabel}
     </Button>
   </div>

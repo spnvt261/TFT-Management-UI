@@ -1,16 +1,24 @@
 import { Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router-dom";
-import { useRuleSetDetail } from "@/features/rules/hooks";
-import { normalizeMatchStakesBuilderConfig, summarizeMatchStakesBuilder } from "@/features/rules/builder-utils";
 import { ErrorState } from "@/components/states/ErrorState";
 import { PageLoading } from "@/components/states/PageLoading";
-import { MetricCard } from "@/components/layout/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
+import {
+  RuleSetStatusBadges,
+  RulesBreadcrumb,
+  VersionRowActionMenu
+} from "@/features/rules/components";
+import {
+  normalizeMatchStakesBuilderConfig,
+  summarizeMatchStakesBuilder
+} from "@/features/rules/builder-utils";
+import { useRuleSetDetail } from "@/features/rules/hooks";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { formatDateTime } from "@/lib/format";
-import { moduleLabels, ruleStatusLabels } from "@/lib/labels";
+import { moduleLabels } from "@/lib/labels";
 import type { RuleSetVersionListItemDto } from "@/types/api";
 
 const VersionSummary = ({ version }: { version: RuleSetVersionListItemDto }) => {
@@ -20,28 +28,34 @@ const VersionSummary = ({ version }: { version: RuleSetVersionListItemDto }) => 
       const summary = summarizeMatchStakesBuilder(config);
 
       return (
-        <div className="space-y-1 text-xs text-slate-600">
+        <div className="space-y-1 text-xs leading-5 text-slate-600">
           <div className="font-medium text-slate-800">{summary.headline}</div>
-          <div>payouts: {summary.payouts}</div>
-          <div>losses: {summary.losses}</div>
-          <div>penalties: {summary.penalties}</div>
+          <div>{summary.payouts}</div>
+          <div>{summary.losses}</div>
+          <div>{summary.penalties}</div>
         </div>
       );
     }
-
-    return <span className="text-xs text-slate-500">Builder config present but unreadable.</span>;
   }
 
   if (version.builderType) {
-    return <span className="text-xs text-slate-500">Builder type: {version.builderType}</span>;
+    return <span className="text-xs text-slate-500">Builder summary unavailable.</span>;
   }
 
-  return <span className="text-xs text-slate-500">Raw mode version (compiled rules only).</span>;
+  return <span className="text-xs text-slate-500">Raw mode version snapshot.</span>;
 };
+
+const MetaItem = ({ label, value }: { label: string; value: string }) => (
+  <div className="space-y-1">
+    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="text-sm text-slate-700">{value}</div>
+  </div>
+);
 
 export const RuleSetDetailPage = () => {
   const navigate = useNavigate();
   const { ruleSetId } = useParams();
+  const isMobile = useIsMobile();
   const detailQuery = useRuleSetDetail(ruleSetId);
 
   if (!ruleSetId) {
@@ -63,21 +77,23 @@ export const RuleSetDetailPage = () => {
       title: "Version",
       dataIndex: "versionNo",
       key: "versionNo",
-      width: 100,
-      render: (value: number) => <span className="font-medium">v{value}</span>
+      width: 90,
+      render: (value: number) => <span className="font-medium text-slate-800">v{value}</span>
     },
     {
       title: "Participants",
-      key: "participantRange",
-      width: 140,
-      render: (_, version) => `${version.participantCountMin}-${version.participantCountMax}`
+      key: "participantCount",
+      width: 120,
+      render: (_, version) => (
+        <span className="text-sm text-slate-700">{version.participantCountMin}</span>
+      )
     },
     {
       title: "Effective Window",
       key: "effectiveWindow",
-      width: 260,
+      width: 240,
       render: (_, version) => (
-        <div className="text-xs text-slate-600">
+        <div className="space-y-1 text-xs text-slate-600">
           <div>From: {formatDateTime(version.effectiveFrom)}</div>
           <div>To: {formatDateTime(version.effectiveTo)}</div>
         </div>
@@ -86,85 +102,99 @@ export const RuleSetDetailPage = () => {
     {
       title: "Status",
       key: "status",
-      width: 180,
+      width: 120,
       render: (_, version) => (
-        <div className="flex flex-wrap gap-1">
-          <Tag color={version.isActive ? "green" : "default"}>{version.isActive ? "Active" : "Inactive"}</Tag>
-          {version.builderType ? <Tag color="geekblue">{version.builderType}</Tag> : <Tag>RAW</Tag>}
-        </div>
+        <Tag color={version.isActive ? "green" : "default"}>
+          {version.isActive ? "Active" : "Inactive"}
+        </Tag>
       )
     },
     {
       title: "Business Summary",
       key: "summary",
-      render: (_, version) => <VersionSummary version={version} />
+      width: 200,
+      render: (_, version) => (
+        <div className="whitespace-normal break-words">
+          <VersionSummary version={version} />
+        </div>
+      )
     },
     {
-      title: "Actions",
+      title: "",
       key: "actions",
-      width: 330,
+      width: 70,
+      align: "center",
       render: (_, version) => (
-        <div className="flex gap-2">
-          <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}>View detail</Button>
-          {version.builderType === "MATCH_STAKES_PAYOUT" ? (
-            <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/new?fromVersionId=${version.id}`)}>
-              New Version From Config
-            </Button>
-          ) : null}
-          <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}/edit`)}>Edit metadata</Button>
-        </div>
+        <VersionRowActionMenu
+          isMobile={isMobile}
+          onViewDetail={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}
+          onEditMetadata={() => navigate(`/rules/${ruleSetId}/versions/${version.id}/edit`)}
+          onNewVersionFromConfig={
+            version.builderType === "MATCH_STAKES_PAYOUT"
+              ? () =>
+                  navigate(
+                    `/rules/${ruleSetId}/versions/new?fromVersionId=${version.id}`
+                  )
+              : undefined
+          }
+        />
       )
     }
   ];
 
   return (
     <PageContainer>
+      <RulesBreadcrumb
+        items={[
+          { label: "Rules", to: "/rules" },
+          { label: data.name }
+        ]}
+      />
+
       <PageHeader
         title={data.name}
-        subtitle="Rule set metadata and version history"
+        subtitle={data.description || "No description provided."}
         actions={
           <>
-            <Button onClick={() => navigate(`/rules/${ruleSetId}/edit`)}>Edit metadata</Button>
-            <Button type="primary" onClick={() => navigate(`/rules/${ruleSetId}/versions/new`)}>
+            <Button onClick={() => navigate(`/rules/${ruleSetId}/edit`)}>
+              Edit metadata
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => navigate(`/rules/${ruleSetId}/versions/new`)}
+            >
               Create version
             </Button>
           </>
         }
       />
 
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Module" value={moduleLabels[data.module]} />
-        <MetricCard label="Code" value={data.code} />
-        <MetricCard label="Status" value={ruleStatusLabels[data.status]} />
-        <MetricCard label="Default" value={data.isDefault ? "Yes" : "No"} />
-      </section>
+      <RuleSetStatusBadges status={data.status} isDefault={data.isDefault} />
 
-      <SectionCard title="Metadata">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <div className="text-xs text-slate-500">Description</div>
-            <div className="mt-1 text-sm text-slate-700">{data.description || "No description"}</div>
-          </div>
-
-          <div className="text-xs text-slate-500">
-            <div>Created: {formatDateTime(data.createdAt)}</div>
-            <div>Updated: {formatDateTime(data.updatedAt)}</div>
-          </div>
+      <SectionCard title="Metadata" description="Core business context for this rule set">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetaItem label="Module" value={moduleLabels[data.module]} />
+          <MetaItem label="Code" value={data.code} />
+          <MetaItem label="Created" value={formatDateTime(data.createdAt)} />
+          <MetaItem label="Updated" value={formatDateTime(data.updatedAt)} />
         </div>
       </SectionCard>
 
       <SectionCard
         title={`Versions (${data.versions.length})`}
-        description="Builder metadata and compiled-rule snapshots"
+        description="Version history with business-focused summaries"
       >
-        <Table
-          rowKey="id"
-          dataSource={data.versions}
-          columns={columns}
-          pagination={false}
-          locale={{ emptyText: "No versions yet" }}
-          scroll={{ x: 1100 }}
-        />
+        <div className="overflow-x-auto">
+          <Table
+            rowKey="id"
+            dataSource={data.versions}
+            columns={columns}
+            pagination={false}
+            size="middle"
+            locale={{ emptyText: "No versions yet" }}
+            scroll={{ x: 980 }}
+          />
+        </div>
       </SectionCard>
     </PageContainer>
   );
