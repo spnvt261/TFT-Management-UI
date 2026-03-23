@@ -63,8 +63,8 @@ export const RuleSetVersionEditPage = () => {
       <Alert
         showIcon
         type="info"
-        message="Metadata-only update"
-        description="This endpoint updates only version metadata (active flag, effective end time, summary JSON). Rule logic body is immutable."
+        message="Save as a new version"
+        description="This action keeps previous versions immutable and creates a new version with updated metadata."
       />
 
       <Card>
@@ -73,13 +73,13 @@ export const RuleSetVersionEditPage = () => {
           onSubmit={form.handleSubmit(async (values) => {
             setApiError(null);
             try {
-              await updateMutation.mutateAsync({
+              const createdVersion = await updateMutation.mutateAsync({
                 isActive: values.isActive,
                 effectiveTo: values.effectiveTo || null,
                 summaryJson: parseRecordJson(values.summaryJsonText)
               });
-              message.success("Version metadata updated");
-              navigate(`/rules/${ruleSetId}/versions/${versionId}`);
+              message.success("New version created from metadata update");
+              navigate(`/rules/${ruleSetId}/versions/${createdVersion.id}`);
             } catch (error) {
               setApiError(getErrorMessage(toAppError(error)));
             }

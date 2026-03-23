@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, message } from "antd";
+import { Button, Card, message } from "antd";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
@@ -18,7 +18,6 @@ import {
 } from "@/features/rules/create-flow/components";
 import {
   buildRankAmounts,
-  buildAutoRuleCode,
   formatRankAmountList,
   sameRankAmounts,
   sumAmounts
@@ -27,13 +26,33 @@ import {
   groupFundRuleCreateFlowSchema,
   type GroupFundRuleCreateFlowValues
 } from "@/features/rules/schemas";
-import { useCreateRuleSet, useCreateRuleSetVersionById } from "@/features/rules/hooks";
+import {
+  useCreateRuleSet,
+  useUpdateRuleSet
+} from "@/features/rules/hooks";
 
-interface Step2RecoveryState {
-  createdRuleSet: RuleSetDto;
-  versionPayload: CreateRuleSetVersionRequest;
-  errorMessage: string;
+interface GroupFundRuleEditContext {
+  ruleSet: RuleSetDto;
+  initialValues?: Partial<GroupFundRuleCreateFlowValues>;
 }
+
+interface GroupFundRuleCreateFlowProps {
+  editContext?: GroupFundRuleEditContext;
+}
+
+const defaultValues: GroupFundRuleCreateFlowValues = {
+  name: "",
+  description: "",
+  isDefault: false,
+  participantCount: 4,
+  contributions: [
+    { relativeRank: 1, amountVnd: 0 },
+    { relativeRank: 2, amountVnd: 0 },
+    { relativeRank: 3, amountVnd: 0 },
+    { relativeRank: 4, amountVnd: 0 }
+  ],
+  penalties: []
+};
 
 const toContributionRules = (values: GroupFundRuleCreateFlowValues): RuleInput[] =>
   values.contributions
@@ -127,40 +146,46 @@ const toPenaltyRules = (values: GroupFundRuleCreateFlowValues): RuleInput[] =>
       ]
     }));
 
-export const GroupFundRuleCreateFlow = () => {
+export const GroupFundRuleCreateFlow = ({
+  editContext
+}: GroupFundRuleCreateFlowProps = {}) => {
   const navigate = useNavigate();
+  const isEditMode = Boolean(editContext);
   const createRuleSetMutation = useCreateRuleSet();
-  const createVersionMutation = useCreateRuleSetVersionById();
+  const updateRuleSetMutation = useUpdateRuleSet(editContext?.ruleSet.id ?? "");
 
   const [apiError, setApiError] = useState<string | null>(null);
-  const [step2Recovery, setStep2Recovery] = useState<Step2RecoveryState | null>(null);
 
   const form = useForm<GroupFundRuleCreateFlowValues>({
     resolver: zodResolver(groupFundRuleCreateFlowSchema),
     mode: "onChange",
-    defaultValues: {
-      name: "",
-      description: "",
-      isDefault: false,
-      participantCount: 4,
-      contributions: [
-        { relativeRank: 1, amountVnd: 0 },
-        { relativeRank: 2, amountVnd: 0 },
-        { relativeRank: 3, amountVnd: 0 },
-        { relativeRank: 4, amountVnd: 0 }
-      ],
-      penalties: []
-    }
+    defaultValues
   });
 
-  const participantCount = useWatch({ control: form.control, name: "participantCount" });
+  const participantCount = useWatch({
+    control: form.control,
+    name: "participantCount"
+  });
   const contributions = useWatch({ control: form.control, name: "contributions" }) ?? [];
   const penalties = useWatch({ control: form.control, name: "penalties" }) ?? [];
   const isDefault = useWatch({ control: form.control, name: "isDefault" });
+
   const penaltiesFieldArray = useFieldArray({
     control: form.control,
     name: "penalties"
   });
+
+  useEffect(() => {
+    if (!editContext?.initialValues) {
+      return;
+    }
+
+    form.reset({
+      ...defaultValues,
+      ...editContext.initialValues,
+      description: editContext.initialValues.description ?? ""
+    });
+  }, [editContext?.initialValues, form]);
 
   useEffect(() => {
     const expectedRows = buildRankAmounts(1, participantCount, contributions);
@@ -174,12 +199,29 @@ export const GroupFundRuleCreateFlow = () => {
     () => contributions.filter((item) => item.amountVnd > 0).length,
     [contributions]
   );
-  const activePenaltyCount = useMemo(() => penalties.filter((item) => item.amountVnd > 0).length, [penalties]);
-  const totalPenalty = useMemo(() => sumAmounts(penalties.map((item) => ({ relativeRank: item.absolutePlacement, amountVnd: item.amountVnd }))), [penalties]);
+  const activePenaltyCount = useMemo(
+    () => penalties.filter((item) => item.amountVnd > 0).length,
+    [penalties]
+  );
+  const totalPenalty = useMemo(
+    () =>
+      sumAmounts(
+        penalties.map((item) => ({
+          relativeRank: item.absolutePlacement,
+          amountVnd: item.amountVnd
+        }))
+      ),
+    [penalties]
+  );
   const reviewPenaltyLines = useMemo(
     () =>
       penalties.length
-        ? penalties.map((item) => `Placement ${item.absolutePlacement}: +${formatAmountVnd(item.amountVnd)} VND to fund account`)
+        ? penalties.map(
+            (item) =>
+              `Placement ${item.absolutePlacement}: +${formatAmountVnd(
+                item.amountVnd
+              )} VND to fund account`
+          )
         : ["No extra penalties"],
     [penalties]
   );
@@ -197,65 +239,59 @@ export const GroupFundRuleCreateFlow = () => {
 
   const submit = form.handleSubmit(async (values) => {
     setApiError(null);
-    setStep2Recovery(null);
+    const versionPayload = createVersionPayload(values);
+
+    if (editContext) {
+      try {
+        const updatedRuleSet = await updateRuleSetMutation.mutateAsync({
+          name: values.name,
+          isDefault: values.isDefault,
+          description: values.description || null,
+          ...versionPayload
+        });
+
+        if (updatedRuleSet.latestVersion?.id) {
+          message.success("Rule updated. New version created.");
+          navigate(`/rules/${editContext.ruleSet.id}/versions/${updatedRuleSet.latestVersion.id}`);
+        } else {
+          message.success("Rule updated.");
+          navigate(`/rules/${editContext.ruleSet.id}`);
+        }
+      } catch (error) {
+        setApiError(getErrorMessage(toAppError(error)));
+      }
+
+      return;
+    }
 
     try {
       const createdRuleSet = await createRuleSetMutation.mutateAsync({
         module: "GROUP_FUND",
-        code: buildAutoRuleCode("GF", values.name),
         name: values.name,
-        description: values.description || null,
         status: "ACTIVE",
-        isDefault: values.isDefault
+        isDefault: values.isDefault,
+        description: values.description || null,
+        ...versionPayload
       });
 
-      const versionPayload = createVersionPayload(values);
-
-      try {
-        const createdVersion = await createVersionMutation.mutateAsync({
-          ruleSetId: createdRuleSet.id,
-          payload: versionPayload
-        });
-
+      if (createdRuleSet.latestVersion?.id) {
         message.success("Group Fund rule created successfully");
-        navigate(`/rules/${createdRuleSet.id}/versions/${createdVersion.id}`);
-      } catch (step2Error) {
-        const errorMessage = getErrorMessage(toAppError(step2Error));
-        setApiError("Rule set metadata was created, but version creation failed. You can retry or open the created rule set.");
-        setStep2Recovery({ createdRuleSet, versionPayload, errorMessage });
+        navigate(`/rules/${createdRuleSet.id}/versions/${createdRuleSet.latestVersion.id}`);
+      } else {
+        message.success("Group Fund rule created successfully");
+        navigate(`/rules/${createdRuleSet.id}`);
       }
     } catch (error) {
       setApiError(getErrorMessage(toAppError(error)));
     }
   });
 
-  const retryStep2 = async () => {
-    if (!step2Recovery) {
+  const handleCancel = () => {
+    if (editContext) {
+      navigate(`/rules/${editContext.ruleSet.id}`);
       return;
     }
 
-    try {
-      const createdVersion = await createVersionMutation.mutateAsync({
-        ruleSetId: step2Recovery.createdRuleSet.id,
-        payload: step2Recovery.versionPayload
-      });
-
-      message.success("Version creation retried successfully");
-      navigate(`/rules/${step2Recovery.createdRuleSet.id}/versions/${createdVersion.id}`);
-    } catch (error) {
-      setApiError("Retry failed. Please review the error and open the created rule set if needed.");
-      setStep2Recovery((current) =>
-        current
-          ? {
-              ...current,
-              errorMessage: getErrorMessage(toAppError(error))
-            }
-          : null
-      );
-    }
-  };
-
-  const handleCancel = () => {
     if (window.history.length > 1) {
       navigate(-1);
       return;
@@ -270,34 +306,22 @@ export const GroupFundRuleCreateFlow = () => {
       ? String(form.formState.errors.contributions.message ?? "")
       : "";
 
+  const submitLoading = isEditMode
+    ? updateRuleSetMutation.isPending
+    : createRuleSetMutation.isPending;
+
   return (
     <form className="space-y-5" onSubmit={submit}>
       <FormApiError message={apiError} />
 
-      {step2Recovery ? (
-        <Alert
-          type="error"
-          showIcon
-          message="Rule set was created, but version creation failed"
-          description={
-            <div className="space-y-2">
-              <div>{step2Recovery.errorMessage}</div>
-              <div>{`Created rule set: ${step2Recovery.createdRuleSet.name} (${step2Recovery.createdRuleSet.code})`}</div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void retryStep2()} loading={createVersionMutation.isPending}>
-                  Retry Version Creation
-                </Button>
-                <Button onClick={() => navigate(`/rules/${step2Recovery.createdRuleSet.id}`)}>Open Rule Set Detail</Button>
-              </div>
-            </div>
-          }
-        />
-      ) : null}
-
       <RuleBasicInfoSection
         control={form.control}
         errors={form.formState.errors}
-        description="Business information for this Group Fund rule"
+        description={
+          isEditMode
+            ? "Update business information and save this rule set as a new version."
+            : "Business information for this Group Fund rule"
+        }
         hideCode
       />
 
@@ -308,7 +332,9 @@ export const GroupFundRuleCreateFlow = () => {
       >
         <div className="space-y-4">
           <div>
-            <div className="mb-2 text-sm font-semibold text-slate-700">Contribution by Relative Rank</div>
+            <div className="mb-2 text-sm font-semibold text-slate-700">
+              Contribution by Relative Rank
+            </div>
             <div className="space-y-3">
               {contributions.map((item, index) => (
                 <Card key={`contribution-${item.relativeRank}`} size="small" className="!bg-slate-50">
@@ -319,18 +345,28 @@ export const GroupFundRuleCreateFlow = () => {
                     <Controller
                       control={form.control}
                       name={`contributions.${index}.amountVnd`}
-                      render={({ field }) => <CurrencyAmountInput value={field.value} onChange={field.onChange} min={0} />}
+                      render={({ field }) => (
+                        <CurrencyAmountInput
+                          value={field.value}
+                          onChange={field.onChange}
+                          min={0}
+                        />
+                      )}
                     />
                   </div>
                 </Card>
               ))}
             </div>
-            {contributionErrorMessage ? <div className="mt-2 text-xs text-red-600">{contributionErrorMessage}</div> : null}
+            {contributionErrorMessage ? (
+              <div className="mt-2 text-xs text-red-600">{contributionErrorMessage}</div>
+            ) : null}
           </div>
 
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-semibold text-slate-700">Special Penalties (Always to Fund Account)</div>
+              <div className="text-sm font-semibold text-slate-700">
+                Special Penalties (Always to Fund Account)
+              </div>
               <Button
                 type="dashed"
                 onClick={() =>
@@ -359,7 +395,9 @@ export const GroupFundRuleCreateFlow = () => {
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                       <div>
-                        <label className="mb-1 block text-xs font-medium">Absolute placement</label>
+                        <label className="mb-1 block text-xs font-medium">
+                          Absolute placement
+                        </label>
                         <Controller
                           control={form.control}
                           name={`penalties.${index}.absolutePlacement`}
@@ -373,9 +411,13 @@ export const GroupFundRuleCreateFlow = () => {
                             />
                           )}
                         />
-                        {form.formState.errors.penalties?.[index]?.absolutePlacement?.message ? (
+                        {form.formState.errors.penalties?.[index]?.absolutePlacement
+                          ?.message ? (
                           <div className="mt-1 text-xs text-red-600">
-                            {String(form.formState.errors.penalties[index]?.absolutePlacement?.message)}
+                            {String(
+                              form.formState.errors.penalties[index]?.absolutePlacement
+                                ?.message
+                            )}
                           </div>
                         ) : null}
                       </div>
@@ -386,7 +428,11 @@ export const GroupFundRuleCreateFlow = () => {
                           control={form.control}
                           name={`penalties.${index}.amountVnd`}
                           render={({ field: formField }) => (
-                            <CurrencyAmountInput value={formField.value} onChange={formField.onChange} min={0} />
+                            <CurrencyAmountInput
+                              value={formField.value}
+                              onChange={formField.onChange}
+                              min={0}
+                            />
                           )}
                         />
                         {form.formState.errors.penalties?.[index]?.amountVnd?.message ? (
@@ -408,8 +454,11 @@ export const GroupFundRuleCreateFlow = () => {
               </div>
             )}
 
-            {form.formState.errors.penalties && !Array.isArray(form.formState.errors.penalties) ? (
-              <div className="mt-2 text-xs text-red-600">{String(form.formState.errors.penalties.message ?? "")}</div>
+            {form.formState.errors.penalties &&
+            !Array.isArray(form.formState.errors.penalties) ? (
+              <div className="mt-2 text-xs text-red-600">
+                {String(form.formState.errors.penalties.message ?? "")}
+              </div>
             ) : null}
           </div>
         </div>
@@ -441,11 +490,15 @@ export const GroupFundRuleCreateFlow = () => {
           },
           {
             label: "Active contributors",
-            value: `${activeContributionCount} rank${activeContributionCount === 1 ? "" : "s"} with amount > 0`
+            value: `${activeContributionCount} rank${
+              activeContributionCount === 1 ? "" : "s"
+            } with amount > 0`
           },
           {
             label: "Active penalties",
-            value: `${activePenaltyCount} placement${activePenaltyCount === 1 ? "" : "s"} with amount > 0`
+            value: `${activePenaltyCount} placement${
+              activePenaltyCount === 1 ? "" : "s"
+            } with amount > 0`
           },
           {
             label: "Total to fund",
@@ -455,13 +508,12 @@ export const GroupFundRuleCreateFlow = () => {
         footer={
           <RuleFormFooter
             onCancel={handleCancel}
-            submitLabel="Create Group Fund Rule"
-            submitLoading={createRuleSetMutation.isPending || createVersionMutation.isPending}
+            submitLabel={isEditMode ? "Save as New Version" : "Create Group Fund Rule"}
+            submitLoading={submitLoading}
             submitDisabled={!form.formState.isValid}
           />
         }
       />
-
     </form>
   );
 };

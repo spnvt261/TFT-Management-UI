@@ -175,44 +175,48 @@ export interface RuleSetDto {
   updatedAt: string;
 }
 
-export interface RuleSetVersionListItemDto {
-  id: string;
-  ruleSetId: string;
-  versionNo: number;
-  participantCountMin: number;
-  participantCountMax: number;
-  effectiveFrom: string;
-  effectiveTo: string | null;
-  isActive: boolean;
-  summaryJson: unknown;
-  builderType: string | null;
-  builderConfig: unknown | null;
-  createdAt: string;
-  rules: [];
-}
-
 export interface ListRuleSetsQuery {
   module?: ModuleType;
+  modules?: ModuleType[];
   status?: RuleStatus;
   isDefault?: boolean;
+  default?: boolean;
+  search?: string;
+  from?: string;
+  to?: string;
   page?: number;
   pageSize?: number;
 }
 
 export interface CreateRuleSetRequest {
   module: ModuleType;
-  code: string;
   name: string;
-  description?: string | null;
   status?: RuleStatus;
   isDefault?: boolean;
+  description: string | null;
+  participantCountMin: number;
+  participantCountMax: number;
+  effectiveTo?: string | null;
+  isActive?: boolean;
+  summaryJson?: Record<string, unknown> | null;
+  builderType?: RuleBuilderType | null;
+  builderConfig?: MatchStakesBuilderConfig | Record<string, unknown> | null;
+  rules?: RuleInput[];
 }
 
 export interface UpdateRuleSetRequest {
   name?: string;
-  description?: string | null;
   status?: RuleStatus;
   isDefault?: boolean;
+  description: string | null;
+  participantCountMin: number;
+  participantCountMax: number;
+  effectiveTo?: string | null;
+  isActive?: boolean;
+  summaryJson?: Record<string, unknown> | null;
+  builderType?: RuleBuilderType | null;
+  builderConfig?: MatchStakesBuilderConfig | Record<string, unknown> | null;
+  rules?: RuleInput[];
 }
 
 export interface RuleConditionDto {
@@ -253,6 +257,7 @@ export interface RuleSetVersionDetailDto {
   id: string;
   ruleSetId: string;
   versionNo: number;
+  description: string | null;
   participantCountMin: number;
   participantCountMax: number;
   effectiveFrom: string;
@@ -265,8 +270,11 @@ export interface RuleSetVersionDetailDto {
   rules: RuleDto[];
 }
 
+export type RuleSetVersionListItemDto = RuleSetVersionDetailDto;
+
 export interface RuleSetDetailDto extends RuleSetDto {
-  versions: RuleSetVersionListItemDto[];
+  latestVersion: RuleSetVersionDetailDto | null;
+  versions: RuleSetVersionDetailDto[];
 }
 
 export type RuleConditionKey =

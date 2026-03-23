@@ -4,7 +4,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ErrorState } from "@/components/states/ErrorState";
 import { PageLoading } from "@/components/states/PageLoading";
 import { PageContainer } from "@/components/layout/PageContainer";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
 import {
   RuleSetStatusBadges,
@@ -112,7 +111,7 @@ export const RuleSetDetailPage = () => {
     {
       title: "Business Summary",
       key: "summary",
-      width: 200,
+      width: 420,
       render: (_, version) => (
         <div className="whitespace-normal break-words">
           <VersionSummary version={version} />
@@ -151,30 +150,29 @@ export const RuleSetDetailPage = () => {
         ]}
       />
 
-      <PageHeader
-        title={data.name}
-        subtitle={data.description || "No description provided."}
-        actions={
-          <>
-            <Button onClick={() => navigate(`/rules/${ruleSetId}/edit`)}>
-              Edit metadata
-            </Button>
-            <Button
-              type="primary"
-              onClick={() => navigate(`/rules/${ruleSetId}/versions/new`)}
-            >
-              Create version
-            </Button>
-          </>
-        }
-      />
+      <header className="flex flex-wrap items-start justify-between gap-3 lg:gap-4">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 lg:text-2xl">
+              {data.name}
+            </h2>
+            <RuleSetStatusBadges status={data.status} isDefault={data.isDefault} />
+          </div>
+          <p className="text-sm text-slate-500">
+            {data.description || "No description provided."}
+          </p>
+        </div>
 
-      <RuleSetStatusBadges status={data.status} isDefault={data.isDefault} />
+        <div className="flex w-full justify-end sm:w-auto">
+          <Button onClick={() => navigate(`/rules/${ruleSetId}/edit`)}>
+            Edit rule
+          </Button>
+        </div>
+      </header>
 
-      <SectionCard title="Metadata" description="Core business context for this rule set">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <SectionCard title={data.name} description={data.description || "No description provided."}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MetaItem label="Module" value={moduleLabels[data.module]} />
-          <MetaItem label="Code" value={data.code} />
           <MetaItem label="Created" value={formatDateTime(data.createdAt)} />
           <MetaItem label="Updated" value={formatDateTime(data.updatedAt)} />
         </div>

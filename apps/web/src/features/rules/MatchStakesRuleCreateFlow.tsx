@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Typography, message } from "antd";
+import { Card, Typography, message } from "antd";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
@@ -8,7 +8,10 @@ import { FormApiError } from "@/components/common/FormApiError";
 import { SectionCard } from "@/components/layout/SectionCard";
 import { toAppError } from "@/api/httpClient";
 import { getErrorMessage } from "@/lib/error-messages";
-import { formatAmountVnd, formatPenaltyDestination } from "@/features/rules/builder-utils";
+import {
+  formatAmountVnd,
+  formatPenaltyDestination
+} from "@/features/rules/builder-utils";
 import {
   CurrencyAmountInput,
   PenaltyList,
@@ -24,48 +27,60 @@ import {
   formatRankAmountList,
   sameRankAmounts,
   sumAmounts,
-  winnerOptionsByParticipant,
-  buildAutoRuleCode
+  winnerOptionsByParticipant
 } from "@/features/rules/create-flow/utils";
 import {
   matchStakesRuleCreateFlowSchema,
   type MatchStakesRuleCreateFlowValues
 } from "@/features/rules/schemas";
-import { useCreateRuleSet, useCreateRuleSetVersionById } from "@/features/rules/hooks";
+import {
+  useCreateRuleSet,
+  useUpdateRuleSet
+} from "@/features/rules/hooks";
 
-interface Step2RecoveryState {
-  createdRuleSet: RuleSetDto;
-  versionPayload: CreateRuleSetVersionRequest;
-  errorMessage: string;
+interface MatchStakesRuleEditContext {
+  ruleSet: RuleSetDto;
+  initialValues?: Partial<MatchStakesRuleCreateFlowValues>;
 }
 
-export const MatchStakesRuleCreateFlow = () => {
+interface MatchStakesRuleCreateFlowProps {
+  editContext?: MatchStakesRuleEditContext;
+}
+
+const defaultValues: MatchStakesRuleCreateFlowValues = {
+  name: "",
+  description: "",
+  isDefault: false,
+  participantCount: 3,
+  winnerCount: 1,
+  winnerPayouts: [],
+  losses: [
+    { relativeRank: 2, amountVnd: 0 },
+    { relativeRank: 3, amountVnd: 0 }
+  ],
+  penalties: []
+};
+
+export const MatchStakesRuleCreateFlow = ({
+  editContext
+}: MatchStakesRuleCreateFlowProps = {}) => {
   const navigate = useNavigate();
+  const isEditMode = Boolean(editContext);
   const createRuleSetMutation = useCreateRuleSet();
-  const createVersionMutation = useCreateRuleSetVersionById();
+  const updateRuleSetMutation = useUpdateRuleSet(editContext?.ruleSet.id ?? "");
 
   const [apiError, setApiError] = useState<string | null>(null);
-  const [step2Recovery, setStep2Recovery] = useState<Step2RecoveryState | null>(null);
 
   const form = useForm<MatchStakesRuleCreateFlowValues>({
     resolver: zodResolver(matchStakesRuleCreateFlowSchema),
     mode: "onChange",
-    defaultValues: {
-      name: "",
-      description: "",
-      isDefault: false,
-      participantCount: 3,
-      winnerCount: 1,
-      winnerPayouts: [],
-      losses: [
-        { relativeRank: 2, amountVnd: 0 },
-        { relativeRank: 3, amountVnd: 0 }
-      ],
-      penalties: []
-    }
+    defaultValues
   });
 
-  const participantCount = useWatch({ control: form.control, name: "participantCount" });
+  const participantCount = useWatch({
+    control: form.control,
+    name: "participantCount"
+  });
   const winnerCount = useWatch({ control: form.control, name: "winnerCount" });
   const winnerPayouts = useWatch({ control: form.control, name: "winnerPayouts" }) ?? [];
   const losses = useWatch({ control: form.control, name: "losses" }) ?? [];
@@ -78,6 +93,18 @@ export const MatchStakesRuleCreateFlow = () => {
   });
 
   useEffect(() => {
+    if (!editContext?.initialValues) {
+      return;
+    }
+
+    form.reset({
+      ...defaultValues,
+      ...editContext.initialValues,
+      description: editContext.initialValues.description ?? ""
+    });
+  }, [editContext?.initialValues, form]);
+
+  useEffect(() => {
     const recommended = defaultWinnerCount(participantCount);
     if (winnerCount >= participantCount || winnerCount < 1) {
       form.setValue("winnerCount", recommended, { shouldValidate: true });
@@ -85,7 +112,8 @@ export const MatchStakesRuleCreateFlow = () => {
   }, [form, participantCount, winnerCount]);
 
   useEffect(() => {
-    const expectedWinnerRows = winnerCount > 1 ? buildRankAmounts(2, winnerCount, winnerPayouts) : [];
+    const expectedWinnerRows =
+      winnerCount > 1 ? buildRankAmounts(2, winnerCount, winnerPayouts) : [];
     if (!sameRankAmounts(winnerPayouts, expectedWinnerRows)) {
       form.setValue("winnerPayouts", expectedWinnerRows, { shouldValidate: true });
     }
@@ -111,7 +139,9 @@ export const MatchStakesRuleCreateFlow = () => {
   const topWinnerError =
     topWinnerPayout < 0
       ? "Top 1 payout is negative. Reduce lower winner payouts or increase loser amounts."
-      : winnerCount > 1 && topWinnerPayout <= (winnerPayouts.find((item) => item.relativeRank === 2)?.amountVnd ?? 0)
+      : winnerCount > 1 &&
+          topWinnerPayout <=
+            (winnerPayouts.find((item) => item.relativeRank === 2)?.amountVnd ?? 0)
         ? "Top 1 payout must be greater than rank 2 payout."
         : null;
 
@@ -122,9 +152,9 @@ export const MatchStakesRuleCreateFlow = () => {
 
     return penalties.map(
       (penalty) =>
-        `Top ${penalty.absolutePlacement} pays extra ${formatAmountVnd(penalty.amountVnd)} to ${formatPenaltyDestination(
-          penalty.destinationSelectorType
-        )}`
+        `Top ${penalty.absolutePlacement} pays extra ${formatAmountVnd(
+          penalty.amountVnd
+        )} to ${formatPenaltyDestination(penalty.destinationSelectorType)}`
     );
   }, [penalties]);
 
@@ -143,10 +173,12 @@ export const MatchStakesRuleCreateFlow = () => {
       builderConfig: {
         participantCount: values.participantCount,
         winnerCount: values.winnerCount,
-        payouts: [{ relativeRank: 1, amountVnd: computedTopPayout }, ...values.winnerPayouts].map((item) => ({
-          relativeRank: item.relativeRank,
-          amountVnd: item.amountVnd
-        })),
+        payouts: [{ relativeRank: 1, amountVnd: computedTopPayout }, ...values.winnerPayouts].map(
+          (item) => ({
+            relativeRank: item.relativeRank,
+            amountVnd: item.amountVnd
+          })
+        ),
         losses: values.losses.map((item) => ({
           relativeRank: item.relativeRank,
           amountVnd: item.amountVnd
@@ -162,65 +194,59 @@ export const MatchStakesRuleCreateFlow = () => {
 
   const submit = form.handleSubmit(async (values) => {
     setApiError(null);
-    setStep2Recovery(null);
+    const versionPayload = createVersionPayload(values);
+
+    if (editContext) {
+      try {
+        const updatedRuleSet = await updateRuleSetMutation.mutateAsync({
+          name: values.name,
+          isDefault: values.isDefault,
+          description: values.description || null,
+          ...versionPayload
+        });
+
+        if (updatedRuleSet.latestVersion?.id) {
+          message.success("Rule updated. New version created.");
+          navigate(`/rules/${editContext.ruleSet.id}/versions/${updatedRuleSet.latestVersion.id}`);
+        } else {
+          message.success("Rule updated.");
+          navigate(`/rules/${editContext.ruleSet.id}`);
+        }
+      } catch (error) {
+        setApiError(getErrorMessage(toAppError(error)));
+      }
+
+      return;
+    }
 
     try {
       const createdRuleSet = await createRuleSetMutation.mutateAsync({
         module: "MATCH_STAKES",
-        code: buildAutoRuleCode("MS", values.name),
         name: values.name,
-        description: values.description || null,
         status: "ACTIVE",
-        isDefault: values.isDefault
+        isDefault: values.isDefault,
+        description: values.description || null,
+        ...versionPayload
       });
 
-      const versionPayload = createVersionPayload(values);
-
-      try {
-        const createdVersion = await createVersionMutation.mutateAsync({
-          ruleSetId: createdRuleSet.id,
-          payload: versionPayload
-        });
-
+      if (createdRuleSet.latestVersion?.id) {
         message.success("Match Stakes rule created successfully");
-        navigate(`/rules/${createdRuleSet.id}/versions/${createdVersion.id}`);
-      } catch (step2Error) {
-        const errorMessage = getErrorMessage(toAppError(step2Error));
-        setApiError("Rule set metadata was created, but version creation failed. You can retry or open the created rule set.");
-        setStep2Recovery({ createdRuleSet, versionPayload, errorMessage });
+        navigate(`/rules/${createdRuleSet.id}/versions/${createdRuleSet.latestVersion.id}`);
+      } else {
+        message.success("Match Stakes rule created successfully");
+        navigate(`/rules/${createdRuleSet.id}`);
       }
     } catch (error) {
       setApiError(getErrorMessage(toAppError(error)));
     }
   });
 
-  const retryStep2 = async () => {
-    if (!step2Recovery) {
+  const handleCancel = () => {
+    if (editContext) {
+      navigate(`/rules/${editContext.ruleSet.id}`);
       return;
     }
 
-    try {
-      const createdVersion = await createVersionMutation.mutateAsync({
-        ruleSetId: step2Recovery.createdRuleSet.id,
-        payload: step2Recovery.versionPayload
-      });
-
-      message.success("Version creation retried successfully");
-      navigate(`/rules/${step2Recovery.createdRuleSet.id}/versions/${createdVersion.id}`);
-    } catch (error) {
-      setApiError("Retry failed. Please review the error and open the created rule set if needed.");
-      setStep2Recovery((current) =>
-        current
-          ? {
-              ...current,
-              errorMessage: getErrorMessage(toAppError(error))
-            }
-          : null
-      );
-    }
-  };
-
-  const handleCancel = () => {
     if (window.history.length > 1) {
       navigate(-1);
       return;
@@ -230,7 +256,8 @@ export const MatchStakesRuleCreateFlow = () => {
   };
 
   const winnerPayoutErrorMessage =
-    form.formState.errors.winnerPayouts && !Array.isArray(form.formState.errors.winnerPayouts)
+    form.formState.errors.winnerPayouts &&
+    !Array.isArray(form.formState.errors.winnerPayouts)
       ? String(form.formState.errors.winnerPayouts.message ?? "")
       : "";
   const lossErrorMessage =
@@ -239,35 +266,22 @@ export const MatchStakesRuleCreateFlow = () => {
       : "";
 
   const submitDisabled = !form.formState.isValid || !isBalanced || Boolean(topWinnerError);
+  const submitLoading = isEditMode
+    ? updateRuleSetMutation.isPending
+    : createRuleSetMutation.isPending;
 
   return (
     <form className="space-y-5" onSubmit={submit}>
       <FormApiError message={apiError} />
 
-      {step2Recovery ? (
-        <Alert
-          type="error"
-          showIcon
-          message="Rule set was created, but version creation failed"
-          description={
-            <div className="space-y-2">
-              <div>{step2Recovery.errorMessage}</div>
-              <div>{`Created rule set: ${step2Recovery.createdRuleSet.name} (${step2Recovery.createdRuleSet.code})`}</div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void retryStep2()} loading={createVersionMutation.isPending}>
-                  Retry Version Creation
-                </Button>
-                <Button onClick={() => navigate(`/rules/${step2Recovery.createdRuleSet.id}`)}>Open Rule Set Detail</Button>
-              </div>
-            </div>
-          }
-        />
-      ) : null}
-
       <RuleBasicInfoSection
         control={form.control}
         errors={form.formState.errors}
-        description="Business information for this Match Stakes rule"
+        description={
+          isEditMode
+            ? "Update business information and save this rule set as a new version."
+            : "Business information for this Match Stakes rule"
+        }
         hideCode
       />
 
@@ -295,17 +309,28 @@ export const MatchStakesRuleCreateFlow = () => {
               </div>
 
               {winnerPayouts.length === 0 ? (
-                <div className="text-xs text-slate-500">No additional winner payout fields for the current winner count.</div>
+                <div className="text-xs text-slate-500">
+                  No additional winner payout fields for the current winner count.
+                </div>
               ) : (
                 winnerPayouts.map((item, index) => (
-                  <div key={`winner-${item.relativeRank}`} className="grid grid-cols-[120px_1fr] gap-3">
+                  <div
+                    key={`winner-${item.relativeRank}`}
+                    className="grid grid-cols-[120px_1fr] gap-3"
+                  >
                     <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-emerald-700">
                       Rank {item.relativeRank}
                     </div>
                     <Controller
                       control={form.control}
                       name={`winnerPayouts.${index}.amountVnd`}
-                      render={({ field }) => <CurrencyAmountInput value={field.value} onChange={field.onChange} min={0} />}
+                      render={({ field }) => (
+                        <CurrencyAmountInput
+                          value={field.value}
+                          onChange={field.onChange}
+                          min={0}
+                        />
+                      )}
                     />
                   </div>
                 ))
@@ -316,14 +341,23 @@ export const MatchStakesRuleCreateFlow = () => {
           <Card title="Losers" className="!border-rose-200 !bg-rose-50/40">
             <div className="space-y-3">
               {losses.map((item, index) => (
-                <div key={`loss-${item.relativeRank}`} className="grid grid-cols-[120px_1fr] gap-3">
+                <div
+                  key={`loss-${item.relativeRank}`}
+                  className="grid grid-cols-[120px_1fr] gap-3"
+                >
                   <div className="flex items-center rounded-lg bg-white px-3 text-sm font-medium text-rose-700">
                     Rank {item.relativeRank}
                   </div>
                   <Controller
                     control={form.control}
                     name={`losses.${index}.amountVnd`}
-                    render={({ field }) => <CurrencyAmountInput value={field.value} onChange={field.onChange} min={0} />}
+                    render={({ field }) => (
+                      <CurrencyAmountInput
+                        value={field.value}
+                        onChange={field.onChange}
+                        min={0}
+                      />
+                    )}
                   />
                 </div>
               ))}
@@ -331,7 +365,9 @@ export const MatchStakesRuleCreateFlow = () => {
           </Card>
         </div>
 
-        {winnerPayoutErrorMessage ? <div className="mt-2 text-xs text-red-600">{winnerPayoutErrorMessage}</div> : null}
+        {winnerPayoutErrorMessage ? (
+          <div className="mt-2 text-xs text-red-600">{winnerPayoutErrorMessage}</div>
+        ) : null}
         {lossErrorMessage ? <div className="mt-2 text-xs text-red-600">{lossErrorMessage}</div> : null}
         {topWinnerError ? <div className="mt-2 text-xs text-red-600">{topWinnerError}</div> : null}
         {!topWinnerError && isBalanced ? (
@@ -359,7 +395,9 @@ export const MatchStakesRuleCreateFlow = () => {
         rows={[
           {
             label: "Match setup",
-            value: `${participantCount} players, ${winnerCount} winner${winnerCount > 1 ? "s" : ""}`
+            value: `${participantCount} players, ${winnerCount} winner${
+              winnerCount > 1 ? "s" : ""
+            }`
           },
           {
             label: "Losers",
@@ -385,15 +423,17 @@ export const MatchStakesRuleCreateFlow = () => {
         footer={
           <RuleFormFooter
             onCancel={handleCancel}
-            submitLabel="Create Match Stakes Rule"
-            submitLoading={createRuleSetMutation.isPending || createVersionMutation.isPending}
+            submitLabel={isEditMode ? "Save as New Version" : "Create Match Stakes Rule"}
+            submitLoading={submitLoading}
             submitDisabled={submitDisabled}
           />
         }
       />
 
       {!isBalanced ? (
-        <Typography.Text type="danger">Submission is disabled until payouts and losses are balanced.</Typography.Text>
+        <Typography.Text type="danger">
+          Submission is disabled until payouts and losses are balanced.
+        </Typography.Text>
       ) : null}
     </form>
   );
