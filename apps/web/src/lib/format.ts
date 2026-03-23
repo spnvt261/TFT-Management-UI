@@ -13,7 +13,7 @@ const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const resolveTimezone = (override?: string) => override ?? env.appTimeZone ?? browserZone;
 
 export const formatVnd = (value: number): string => {
-  return `${new Intl.NumberFormat("vi-VN").format(value)} ?`;
+  return `${new Intl.NumberFormat("vi-VN").format(value)} VND`;
 };
 
 export const formatDateTime = (iso: string | null | undefined, overrideTz?: string): string => {

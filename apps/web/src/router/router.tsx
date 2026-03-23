@@ -3,6 +3,7 @@ import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { RouteErrorBoundary } from "@/router/RouteErrorBoundary";
 import DashboardRoute from "@/pages/DashboardRoute";
 import MatchStakesRoute from "@/pages/MatchStakesRoute";
+import MatchStakesCreateRoute from "@/pages/MatchStakesCreateRoute";
 import GroupFundRoute from "@/pages/GroupFundRoute";
 import RulesListRoute from "@/pages/RulesListRoute";
 import RulesCreateRoute from "@/pages/RulesCreateRoute";
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: "dashboard", element: <DashboardRoute /> },
       { path: "match-stakes", element: <MatchStakesRoute /> },
+      { path: "match-stakes/new", element: <MatchStakesCreateRoute /> },
       { path: "group-fund", element: <GroupFundRoute /> },
       { path: "rules", element: <RulesListRoute /> },
       { path: "rules/new", element: <RulesCreateRoute /> },

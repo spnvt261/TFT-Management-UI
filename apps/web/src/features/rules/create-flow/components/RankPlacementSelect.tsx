@@ -7,6 +7,7 @@ interface RankPlacementSelectProps {
   onChange?: (value: number) => void;
   min?: number;
   max: number;
+  disabledValues?: number[];
   disabled?: boolean;
   placeholder?: string;
   size?: SelectProps["size"];
@@ -19,6 +20,7 @@ export const RankPlacementSelect = ({
   onChange,
   min = 1,
   max,
+  disabledValues,
   disabled,
   placeholder,
   size = "middle",
@@ -31,10 +33,11 @@ export const RankPlacementSelect = ({
         const nextValue = index + min;
         return {
           value: nextValue,
-          label: optionLabel ? optionLabel(nextValue) : String(nextValue)
+          label: optionLabel ? optionLabel(nextValue) : String(nextValue),
+          disabled: disabledValues?.includes(nextValue)
         };
       }),
-    [max, min, optionLabel]
+    [disabledValues, max, min, optionLabel]
   );
 
   return (

@@ -1,7 +1,20 @@
 import { apiGet, apiPost } from "@/api/httpClient";
-import type { CreateMatchRequest, MatchDetailDto, MatchListItemDto, MatchListQuery, VoidMatchRequest, VoidMatchResultDto } from "@/types/api";
+import type {
+  CreateMatchRequest,
+  MatchDetailDto,
+  MatchListItemDto,
+  MatchListQuery,
+  PreviewMatchRequest,
+  PreviewMatchResultDto,
+  VoidMatchRequest,
+  VoidMatchResultDto
+} from "@/types/api";
 
 export const matchesApi = {
+  preview: async (payload: PreviewMatchRequest) => {
+    const response = await apiPost<PreviewMatchResultDto, PreviewMatchRequest>("/matches/preview", payload);
+    return response.data;
+  },
   list: async (query: MatchListQuery) => apiGet<MatchListItemDto[]>("/matches", { params: query }),
   create: async (payload: CreateMatchRequest) => {
     const response = await apiPost<MatchDetailDto, CreateMatchRequest>("/matches", payload);

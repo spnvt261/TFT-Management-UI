@@ -347,6 +347,75 @@ export interface DefaultRuleSetByModuleDto {
   activeVersion: RuleSetVersionDetailDto | null;
 }
 
+export interface PreviewMatchRequest {
+  module: ModuleType;
+  ruleSetId: string;
+  note?: string | null;
+  participants: Array<{
+    playerId: string;
+    tftPlacement: number;
+  }>;
+}
+
+export interface PreviewMatchParticipantDto {
+  playerId: string;
+  playerName: string;
+  tftPlacement: number;
+  relativeRank: number;
+  suggestedNetVnd: number;
+}
+
+export interface PreviewSettlementLineDto {
+  lineNo: number;
+  ruleId: string | null;
+  ruleCode: string;
+  ruleName: string;
+  sourceAccountId: string;
+  destinationAccountId: string;
+  sourcePlayerId: string | null;
+  sourcePlayerName: string | null;
+  destinationPlayerId: string | null;
+  destinationPlayerName: string | null;
+  amountVnd: number;
+  reasonText: string;
+  metadata: unknown;
+}
+
+export interface PreviewSettlementDto {
+  totalTransferVnd: number;
+  totalFundInVnd: number;
+  totalFundOutVnd: number;
+  engineVersion: string;
+  ruleSnapshot: unknown;
+  resultSnapshot: unknown;
+  lines: PreviewSettlementLineDto[];
+}
+
+export interface PreviewMatchResultDto {
+  module: ModuleType;
+  note: string | null;
+  ruleSet: { id: string; name: string; module: ModuleType };
+  ruleSetVersion: {
+    id: string;
+    versionNo: number;
+    participantCountMin: number;
+    participantCountMax: number;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+  };
+  participants: PreviewMatchParticipantDto[];
+  settlementPreview: PreviewSettlementDto;
+}
+
+export interface MatchConfirmationInput {
+  mode: "ENGINE" | "MANUAL_ADJUSTED";
+  participantNets?: Array<{
+    playerId: string;
+    netVnd: number;
+  }>;
+  overrideReason?: string | null;
+}
+
 export interface CreateMatchRequest {
   module: ModuleType;
   ruleSetId: string;
@@ -356,6 +425,7 @@ export interface CreateMatchRequest {
     playerId: string;
     tftPlacement: number;
   }>;
+  confirmation?: MatchConfirmationInput;
 }
 
 export interface MatchListQuery {

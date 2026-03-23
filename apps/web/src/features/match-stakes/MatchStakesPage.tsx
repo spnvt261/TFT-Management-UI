@@ -2,13 +2,13 @@ import { useState } from "react";
 import { Button, DatePicker, List, Pagination, Tabs, Tag } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { useNavigate } from "react-router-dom";
 import { useMatchStakesLedger, useMatchStakesMatches, useMatchStakesSummary } from "@/features/match-stakes/hooks";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
-import { QuickMatchEntry } from "@/features/quick-match/QuickMatchEntry";
 import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { MetricCard } from "@/components/layout/MetricCard";
@@ -17,8 +17,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
 
 export const MatchStakesPage = () => {
+  const navigate = useNavigate();
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
-  const [quickOpen, setQuickOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [from, setFrom] = useState<string>();
   const [to, setTo] = useState<string>();
@@ -57,8 +57,8 @@ export const MatchStakesPage = () => {
         title="Match Stakes"
         subtitle="Monitor standings, debt movement, and settlement history."
         actions={
-          <Button className="hidden md:inline-flex" type="primary" icon={<PlusOutlined />} onClick={() => setQuickOpen(true)}>
-            Quick add match
+          <Button className="hidden md:inline-flex" type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
+            Create match
           </Button>
         }
       />
@@ -212,11 +212,10 @@ export const MatchStakesPage = () => {
         size="large"
         icon={<PlusOutlined />}
         className="fixed bottom-6 right-6 z-20 h-14 w-14 shadow-lg md:hidden"
-        aria-label="Quick add match stakes match"
-        onClick={() => setQuickOpen(true)}
+        aria-label="Create match stakes match"
+        onClick={() => navigate("/match-stakes/new")}
       />
 
-      <QuickMatchEntry open={quickOpen} module="MATCH_STAKES" onClose={() => setQuickOpen(false)} />
       <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
     </PageContainer>
   );
