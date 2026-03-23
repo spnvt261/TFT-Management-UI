@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
-import { Button, Pagination, Segmented, Table, Tabs, Tag } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { FilterOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
+import { Badge, Button, Checkbox, DatePicker, Input, Modal, Pagination, Radio, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate } from "react-router-dom";
-import { useRuleSetDetail, useRuleSets } from "@/features/rules/hooks";
+import { useAllRuleSets, useRuleSetDetail } from "@/features/rules/hooks";
 import { normalizeMatchStakesBuilderConfig, summarizeMatchStakesBuilder } from "@/features/rules/builder-utils";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { EmptyState } from "@/components/states/EmptyState";
@@ -19,12 +21,30 @@ import type { ModuleType, RuleSetDto } from "@/types/api";
 
 const pageSize = 12;
 
-type ModuleTabValue = ModuleType | "ALL";
+type StatusFilterValue = "ALL" | "ACTIVE" | "INACTIVE";
+type DefaultFilterValue = "ALL" | "DEFAULT" | "NON_DEFAULT";
 
-const moduleTabs: Array<{ key: ModuleTabValue; label: string }> = [
-  { key: "MATCH_STAKES", label: "Match Stakes" },
-  { key: "GROUP_FUND", label: "Group Fund" },
-  { key: "ALL", label: "All Modules" }
+interface RuleListFilters {
+  name: string;
+  modules: ModuleType[];
+  status: StatusFilterValue;
+  defaultFilter: DefaultFilterValue;
+  updatedFrom?: string;
+  updatedTo?: string;
+}
+
+const createDefaultFilters = (): RuleListFilters => ({
+  name: "",
+  modules: [],
+  status: "ALL",
+  defaultFilter: "ALL",
+  updatedFrom: undefined,
+  updatedTo: undefined
+});
+
+const moduleOptions: Array<{ label: string; value: ModuleType }> = [
+  { label: "Match Stakes", value: "MATCH_STAKES" },
+  { label: "Group Fund", value: "GROUP_FUND" }
 ];
 
 const LatestVersionSummary = ({ ruleSetId }: { ruleSetId: string }) => {
@@ -60,23 +80,107 @@ export const RulesListPage = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
-  const [module, setModule] = useState<ModuleTabValue>("MATCH_STAKES");
-  const [status, setStatus] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
-  const [defaultFilter, setDefaultFilter] = useState<"ALL" | "DEFAULT" | "NON_DEFAULT">("ALL");
   const [page, setPage] = useState(1);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [filters, setFilters] = useState<RuleListFilters>(() => createDefaultFilters());
+  const [draftFilters, setDraftFilters] = useState<RuleListFilters>(() => createDefaultFilters());
 
-  const query = useMemo(
-    () => ({
-      module: module === "ALL" ? undefined : module,
-      status: status === "ALL" ? undefined : status,
-      isDefault: defaultFilter === "ALL" ? undefined : defaultFilter === "DEFAULT",
-      page,
-      pageSize
-    }),
-    [module, status, defaultFilter, page]
+  const ruleSetsQuery = useAllRuleSets();
+  const allRuleSets = ruleSetsQuery.data ?? [];
+  const trimmedName = filters.name.trim().toLowerCase();
+
+  const filteredItems = useMemo(() => {
+    const fromDate = filters.updatedFrom ? dayjs(filters.updatedFrom) : null;
+    const toDate = filters.updatedTo ? dayjs(filters.updatedTo) : null;
+
+    return allRuleSets.filter((item) => {
+      if (filters.modules.length > 0 && !filters.modules.includes(item.module)) {
+        return false;
+      }
+
+      if (filters.status !== "ALL" && item.status !== filters.status) {
+        return false;
+      }
+
+      if (filters.defaultFilter === "DEFAULT" && !item.isDefault) {
+        return false;
+      }
+
+      if (filters.defaultFilter === "NON_DEFAULT" && item.isDefault) {
+        return false;
+      }
+
+      if (trimmedName.length > 0 && !item.name.toLowerCase().includes(trimmedName)) {
+        return false;
+      }
+
+      const updatedAt = dayjs(item.updatedAt);
+      if (fromDate && updatedAt.isBefore(fromDate, "day")) {
+        return false;
+      }
+
+      if (toDate && updatedAt.isAfter(toDate, "day")) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [allRuleSets, filters.defaultFilter, filters.modules, filters.status, filters.updatedFrom, filters.updatedTo, trimmedName]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const items = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredItems.slice(start, start + pageSize);
+  }, [filteredItems, page]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+
+    if (filters.name.trim().length > 0) {
+      count += 1;
+    }
+
+    if (filters.modules.length > 0) {
+      count += 1;
+    }
+
+    if (filters.status !== "ALL") {
+      count += 1;
+    }
+
+    if (filters.defaultFilter !== "ALL") {
+      count += 1;
+    }
+
+    if (filters.updatedFrom || filters.updatedTo) {
+      count += 1;
+    }
+
+    return count;
+  }, [filters]);
+
+  const hasInvalidDraftDateRange = Boolean(
+    draftFilters.updatedFrom && draftFilters.updatedTo && dayjs(draftFilters.updatedFrom).isAfter(dayjs(draftFilters.updatedTo), "day")
   );
 
-  const ruleSetsQuery = useRuleSets(query);
+  const openFilterModal = () => {
+    setDraftFilters(filters);
+    setIsFilterModalOpen(true);
+  };
+
+  const clearAppliedFilters = () => {
+    const next = createDefaultFilters();
+    setFilters(next);
+    setDraftFilters(next);
+    setPage(1);
+  };
 
   if (ruleSetsQuery.isLoading) {
     return <PageLoading label="Loading rule sets..." />;
@@ -85,9 +189,6 @@ export const RulesListPage = () => {
   if (ruleSetsQuery.isError) {
     return <ErrorState onRetry={() => void ruleSetsQuery.refetch()} />;
   }
-
-  const items = ruleSetsQuery.data?.data ?? [];
-  const meta = ruleSetsQuery.data?.meta;
 
   const columns: ColumnsType<RuleSetDto> = [
     {
@@ -164,38 +265,115 @@ export const RulesListPage = () => {
       />
 
       <FilterBar>
-        <div className="space-y-3">
-          <Tabs
-            activeKey={module}
-            onChange={(value) => {
-              setModule(value as ModuleTabValue);
-              setPage(1);
-            }}
-            items={moduleTabs.map((item) => ({ key: item.key, label: item.label }))}
-          />
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-slate-600">
+            {activeFilterCount === 0 ? "Showing all rules" : `${activeFilterCount} filter(s) applied`}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeFilterCount > 0 ? <Button onClick={clearAppliedFilters}>Clear filters</Button> : null}
+            <Badge count={activeFilterCount} size="small">
+              <Button icon={<FilterOutlined />} onClick={openFilterModal}>
+                Filters
+              </Button>
+            </Badge>
+          </div>
+        </div>
+      </FilterBar>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Segmented
-              block
-              value={status}
-              onChange={(value) => {
-                setStatus(value as typeof status);
-                setPage(1);
-              }}
+      <Modal
+        title="Filter rules"
+        open={isFilterModalOpen}
+        destroyOnHidden
+        onCancel={() => setIsFilterModalOpen(false)}
+        footer={[
+          <Button
+            key="reset"
+            onClick={() => {
+              setDraftFilters(createDefaultFilters());
+            }}
+          >
+            Reset
+          </Button>,
+          <Button key="cancel" onClick={() => setIsFilterModalOpen(false)}>
+            Cancel
+          </Button>,
+          <Button
+            key="apply"
+            type="primary"
+            disabled={hasInvalidDraftDateRange}
+            onClick={() => {
+              if (hasInvalidDraftDateRange) {
+                return;
+              }
+
+              setFilters(draftFilters);
+              setPage(1);
+              setIsFilterModalOpen(false);
+            }}
+          >
+            Apply
+          </Button>
+        ]}
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Rule name</div>
+            <Input
+              allowClear
+              placeholder="Search by name"
+              value={draftFilters.name}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  name: event.target.value
+                }))
+              }
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Modules</div>
+            <Checkbox.Group
+              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+              value={draftFilters.modules}
+              options={moduleOptions}
+              onChange={(value) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  modules: value as ModuleType[]
+                }))
+              }
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Status</div>
+            <Radio.Group
+              value={draftFilters.status}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  status: event.target.value as StatusFilterValue
+                }))
+              }
               options={[
                 { label: "All", value: "ALL" },
                 { label: "Active", value: "ACTIVE" },
                 { label: "Inactive", value: "INACTIVE" }
               ]}
             />
+          </div>
 
-            <Segmented
-              block
-              value={defaultFilter}
-              onChange={(value) => {
-                setDefaultFilter(value as typeof defaultFilter);
-                setPage(1);
-              }}
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Default</div>
+            <Radio.Group
+              value={draftFilters.defaultFilter}
+              onChange={(event) =>
+                setDraftFilters((current) => ({
+                  ...current,
+                  defaultFilter: event.target.value as DefaultFilterValue
+                }))
+              }
               options={[
                 { label: "All", value: "ALL" },
                 { label: "Default", value: "DEFAULT" },
@@ -203,14 +381,45 @@ export const RulesListPage = () => {
               ]}
             />
           </div>
+
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Updated date</div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <DatePicker
+                className="w-full"
+                placeholder="From date"
+                value={draftFilters.updatedFrom ? dayjs(draftFilters.updatedFrom) : null}
+                onChange={(value) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    updatedFrom: value ? value.format("YYYY-MM-DD") : undefined
+                  }))
+                }
+              />
+              <DatePicker
+                className="w-full"
+                placeholder="To date"
+                value={draftFilters.updatedTo ? dayjs(draftFilters.updatedTo) : null}
+                onChange={(value) =>
+                  setDraftFilters((current) => ({
+                    ...current,
+                    updatedTo: value ? value.format("YYYY-MM-DD") : undefined
+                  }))
+                }
+              />
+            </div>
+            {hasInvalidDraftDateRange ? (
+              <div className="mt-1 text-xs text-red-600">From date must be before or equal to To date.</div>
+            ) : null}
+          </div>
         </div>
-      </FilterBar>
+      </Modal>
 
       <SectionCard title="Results" description="Business-focused listing with latest version snapshots">
         {items.length === 0 ? (
           <EmptyState
             title="No rules found"
-            description="Try a different filter or create a new rule."
+            description="Try a different filter/search or create a new rule."
             actionLabel="Create Match Stakes Rule"
             onAction={() => navigate("/rules/new?module=MATCH_STAKES")}
           />
@@ -251,9 +460,9 @@ export const RulesListPage = () => {
 
         <div className="mt-4 flex justify-center">
           <Pagination
-            current={meta?.page ?? page}
-            pageSize={meta?.pageSize ?? pageSize}
-            total={meta?.total ?? 0}
+            current={page}
+            pageSize={pageSize}
+            total={filteredItems.length}
             showSizeChanger={false}
             onChange={setPage}
           />

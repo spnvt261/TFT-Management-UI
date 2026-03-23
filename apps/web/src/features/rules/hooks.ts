@@ -10,6 +10,33 @@ export const useRuleSets = (query: ListRuleSetsQuery) =>
     queryFn: () => rulesApi.list(query)
   });
 
+export const useAllRuleSets = () =>
+  useQuery({
+    queryKey: queryKeys.rules.list({ scope: "all" }),
+    queryFn: async () => {
+      const requestPageSize = 100;
+      const firstPage = await rulesApi.list({ page: 1, pageSize: requestPageSize });
+      const totalPages = firstPage.meta?.totalPages ?? 1;
+      const items = [...firstPage.data];
+
+      if (totalPages <= 1) {
+        return items;
+      }
+
+      const restPages = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, index) =>
+          rulesApi.list({ page: index + 2, pageSize: requestPageSize })
+        )
+      );
+
+      for (const page of restPages) {
+        items.push(...page.data);
+      }
+
+      return items;
+    }
+  });
+
 export const useRuleSetDetail = (ruleSetId?: string) =>
   useQuery({
     queryKey: queryKeys.rules.detail(ruleSetId ?? ""),
