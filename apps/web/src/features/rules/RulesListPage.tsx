@@ -6,6 +6,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useNavigate } from "react-router-dom";
 import { useAllRuleSets, useRuleSetDetail } from "@/features/rules/hooks";
 import { normalizeMatchStakesBuilderConfig, summarizeMatchStakesBuilder } from "@/features/rules/builder-utils";
+import { RulesBreadcrumb } from "@/features/rules/components";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { EmptyState } from "@/components/states/EmptyState";
 import { ErrorState } from "@/components/states/ErrorState";
@@ -252,6 +253,8 @@ export const RulesListPage = () => {
 
   return (
     <PageContainer>
+      <RulesBreadcrumb items={[{ label: "Rules" }]} />
+
       <PageHeader
         title="Rules"
         subtitle="Manage business rules by module with builder-based Match Stakes summaries"

@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
 import { ConfirmDanger } from "@/components/common/ConfirmDanger";
 import type { PlayerDto } from "@/types/api";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -46,6 +47,8 @@ export const PlayersPage = () => {
 
   return (
     <PageContainer>
+      <AppBreadcrumb items={[{ label: "Players" }]} />
+
       <PageHeader
         title="Players"
         subtitle="Manage active members for match entry and rule resolution."

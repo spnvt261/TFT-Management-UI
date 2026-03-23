@@ -1,6 +1,7 @@
 import { Button, Card, Collapse, Descriptions, Empty, List, Tag } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
-import { useRuleSetVersionDetail } from "@/features/rules/hooks";
+import { RulesBreadcrumb } from "@/features/rules/components";
+import { useRuleSetDetail, useRuleSetVersionDetail } from "@/features/rules/hooks";
 import {
   formatAmountVnd,
   formatPenaltyDestination,
@@ -17,6 +18,7 @@ import { formatDateTime } from "@/lib/format";
 export const RuleSetVersionDetailPage = () => {
   const navigate = useNavigate();
   const { ruleSetId, versionId } = useParams();
+  const ruleSetQuery = useRuleSetDetail(ruleSetId);
   const versionQuery = useRuleSetVersionDetail(ruleSetId, versionId);
 
   if (!ruleSetId || !versionId) {
@@ -32,6 +34,7 @@ export const RuleSetVersionDetailPage = () => {
   }
 
   const version = versionQuery.data;
+  const ruleSetLabel = ruleSetQuery.data?.name ?? "Rule Set";
   const builderConfig = version.builderType === "MATCH_STAKES_PAYOUT" ? normalizeMatchStakesBuilderConfig(version.builderConfig) : null;
   const builderSummary = builderConfig ? summarizeMatchStakesBuilder(builderConfig) : null;
   const participantLabel =
@@ -42,6 +45,14 @@ export const RuleSetVersionDetailPage = () => {
 
   return (
     <PageContainer>
+      <RulesBreadcrumb
+        items={[
+          { label: "Rules", to: "/rules" },
+          { label: ruleSetLabel, to: `/rules/${ruleSetId}` },
+          { label: `Version v${version.versionNo}` }
+        ]}
+      />
+
       <PageHeader
         title={`Rule Version v${version.versionNo}`}
         subtitle="Business builder summary and compiled rules"

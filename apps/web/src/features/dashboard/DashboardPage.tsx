@@ -6,6 +6,7 @@ import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { MetricCard } from "@/components/layout/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -30,6 +31,8 @@ export const DashboardPage = () => {
 
   return (
     <PageContainer>
+      <AppBreadcrumb items={[{ label: "Dashboard" }]} />
+
       <PageHeader title="Dashboard" subtitle="Quick overview of players, modules, and latest matches." />
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

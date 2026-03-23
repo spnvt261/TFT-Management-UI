@@ -1,8 +1,11 @@
 import { useNavigate } from "react-router-dom";
-import { message } from "antd";
+import { Button, message } from "antd";
 import { PlayerForm } from "@/features/players/PlayerForm";
 import { useCreatePlayer } from "@/features/players/hooks";
 import type { PlayerFormValues } from "@/features/players/schemas";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
 
 export const PlayerCreatePage = () => {
   const navigate = useNavigate();
@@ -20,9 +23,21 @@ export const PlayerCreatePage = () => {
   };
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">Create Player</h2>
+    <PageContainer>
+      <AppBreadcrumb
+        items={[
+          { label: "Players", to: "/players" },
+          { label: "Create Player" }
+        ]}
+      />
+
+      <PageHeader
+        title="Create Player"
+        subtitle="Add a new player profile for match entry and rule resolution."
+        actions={<Button onClick={() => navigate("/players")}>Back to players</Button>}
+      />
+
       <PlayerForm submitLabel="Create Player" submitting={createMutation.isPending} onSubmit={onSubmit} />
-    </div>
+    </PageContainer>
   );
 };

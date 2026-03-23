@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
 import { QuickMatchEntry } from "@/features/quick-match/QuickMatchEntry";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { MetricCard } from "@/components/layout/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -50,6 +51,8 @@ export const MatchStakesPage = () => {
 
   return (
     <PageContainer>
+      <AppBreadcrumb items={[{ label: "Match Stakes" }]} />
+
       <PageHeader
         title="Match Stakes"
         subtitle="Monitor standings, debt movement, and settlement history."

@@ -9,6 +9,7 @@ import {
   useRuleSetVersionDetail,
   useUpdateRuleSet
 } from "@/features/rules/hooks";
+import { RulesBreadcrumb } from "@/features/rules/components";
 import { parseJsonOrDefault, ruleSetVersionMetaSchema, type RuleSetVersionMetaValues } from "@/features/rules/schemas";
 import { FormApiError } from "@/components/common/FormApiError";
 import { ErrorState } from "@/components/states/ErrorState";
@@ -139,6 +140,15 @@ export const RuleSetVersionEditPage = () => {
 
   return (
     <PageContainer>
+      <RulesBreadcrumb
+        items={[
+          { label: "Rules", to: "/rules" },
+          { label: ruleSetQuery.data.name, to: `/rules/${ruleSetId}` },
+          { label: `Version v${detailQuery.data.versionNo}`, to: `/rules/${ruleSetId}/versions/${versionId}` },
+          { label: "Edit Metadata" }
+        ]}
+      />
+
       <PageHeader title="Edit Version Metadata" subtitle={`v${detailQuery.data.versionNo} (${detailQuery.data.builderType || "RAW"})`} />
 
       <Alert

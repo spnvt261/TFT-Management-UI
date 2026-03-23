@@ -20,6 +20,7 @@ import { Controller, FormProvider, useFieldArray, useForm, useWatch } from "reac
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { RuleBuilder } from "@/features/rules/RuleBuilder";
+import { RulesBreadcrumb } from "@/features/rules/components";
 import { useCreateRuleSetVersion, useRuleSetDetail, useRuleSetVersionDetail } from "@/features/rules/hooks";
 import {
   matchStakesVersionBuilderSchema,
@@ -822,6 +823,14 @@ export const RuleSetVersionCreatePage = () => {
 
   return (
     <PageContainer>
+      <RulesBreadcrumb
+        items={[
+          { label: "Rules", to: "/rules" },
+          { label: ruleSet.name, to: `/rules/${ruleSetId}` },
+          { label: "Create Version" }
+        ]}
+      />
+
       <PageHeader
         title="Create Rule Set Version"
         subtitle={`Rule set ${ruleSet.code} (${moduleLabels[ruleSet.module]})`}

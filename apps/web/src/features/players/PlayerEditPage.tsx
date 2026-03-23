@@ -1,10 +1,13 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { message } from "antd";
+import { Button, message } from "antd";
 import { PlayerForm } from "@/features/players/PlayerForm";
 import { usePlayerDetail, useUpdatePlayer } from "@/features/players/hooks";
 import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import type { PlayerFormValues } from "@/features/players/schemas";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
 
 export const PlayerEditPage = () => {
   const navigate = useNavigate();
@@ -36,9 +39,22 @@ export const PlayerEditPage = () => {
   };
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-xl font-bold">Edit Player</h2>
+    <PageContainer>
+      <AppBreadcrumb
+        items={[
+          { label: "Players", to: "/players" },
+          { label: detailQuery.data.displayName },
+          { label: "Edit" }
+        ]}
+      />
+
+      <PageHeader
+        title="Edit Player"
+        subtitle={`Update profile for ${detailQuery.data.displayName}.`}
+        actions={<Button onClick={() => navigate("/players")}>Back to players</Button>}
+      />
+
       <PlayerForm initial={detailQuery.data} submitLabel="Save Changes" submitting={updateMutation.isPending} onSubmit={onSubmit} />
-    </div>
+    </PageContainer>
   );
 };

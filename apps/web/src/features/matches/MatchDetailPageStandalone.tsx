@@ -3,6 +3,9 @@ import { Button, Card, Input, Modal } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMatchDetail, useVoidMatch } from "@/features/matches/hooks";
 import { MatchDetailView } from "@/features/matches/MatchDetailView";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import { getErrorMessage } from "@/lib/error-messages";
@@ -30,13 +33,21 @@ export const MatchDetailPageStandalone = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button onClick={() => navigate(-1)}>Back</Button>
-        <Button danger disabled={detailQuery.data.status === "VOIDED"} onClick={() => setConfirmOpen(true)}>
-          Void match
-        </Button>
-      </div>
+    <PageContainer>
+      <AppBreadcrumb items={[{ label: "Match Detail" }]} />
+
+      <PageHeader
+        title="Match Detail"
+        subtitle="Review participants, transfers, and match status."
+        actions={
+          <>
+            <Button onClick={() => navigate(-1)}>Back</Button>
+            <Button danger disabled={detailQuery.data.status === "VOIDED"} onClick={() => setConfirmOpen(true)}>
+              Void match
+            </Button>
+          </>
+        }
+      />
 
       <MatchDetailView match={detailQuery.data} />
 
@@ -57,6 +68,6 @@ export const MatchDetailPageStandalone = () => {
           <Input.TextArea value={voidReason} onChange={(event) => setVoidReason(event.target.value)} rows={3} />
         </Card>
       </Modal>
-    </div>
+    </PageContainer>
   );
 };

@@ -23,6 +23,7 @@ import { manualTransactionSchema, type ManualTransactionValues } from "@/feature
 import { FormApiError } from "@/components/common/FormApiError";
 import { getErrorMessage } from "@/lib/error-messages";
 import { toAppError } from "@/api/httpClient";
+import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { MetricCard } from "@/components/layout/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -89,6 +90,8 @@ export const GroupFundPage = () => {
 
   return (
     <PageContainer>
+      <AppBreadcrumb items={[{ label: "Group Fund" }]} />
+
       <PageHeader
         title="Group Fund"
         subtitle="Track fund health, obligations, and manual adjustments."
