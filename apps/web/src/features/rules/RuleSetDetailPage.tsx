@@ -1,3 +1,4 @@
+import { ArrowLeftOutlined, EditOutlined } from "@ant-design/icons";
 import { Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router-dom";
@@ -7,15 +8,13 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { SectionCard } from "@/components/layout/SectionCard";
 import {
   RuleSetStatusBadges,
-  RulesBreadcrumb,
-  VersionRowActionMenu
+  RulesBreadcrumb
 } from "@/features/rules/components";
 import {
   normalizeMatchStakesBuilderConfig,
   summarizeMatchStakesBuilder
 } from "@/features/rules/builder-utils";
 import { useRuleSetDetail } from "@/features/rules/hooks";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import { formatDateTime } from "@/lib/format";
 import { moduleLabels } from "@/lib/labels";
 import type { RuleSetVersionListItemDto } from "@/types/api";
@@ -54,7 +53,6 @@ const MetaItem = ({ label, value }: { label: string; value: string }) => (
 export const RuleSetDetailPage = () => {
   const navigate = useNavigate();
   const { ruleSetId } = useParams();
-  const isMobile = useIsMobile();
   const detailQuery = useRuleSetDetail(ruleSetId);
 
   if (!ruleSetId) {
@@ -77,12 +75,21 @@ export const RuleSetDetailPage = () => {
       dataIndex: "versionNo",
       key: "versionNo",
       width: 90,
-      render: (value: number) => <span className="font-medium text-slate-800">v{value}</span>
+      render: (value: number, version) => (
+        <Button
+          type="link"
+          
+          className="!px-0 font-medium underline"
+          onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}
+        >
+          v{value}
+        </Button>
+      )
     },
     {
       title: "Participants",
       key: "participantCount",
-      width: 120,
+      width: 100,
       render: (_, version) => (
         <span className="text-sm text-slate-700">{version.participantCountMin}</span>
       )
@@ -90,7 +97,7 @@ export const RuleSetDetailPage = () => {
     {
       title: "Effective Window",
       key: "effectiveWindow",
-      width: 240,
+      width: 150,
       render: (_, version) => (
         <div className="space-y-1 text-xs text-slate-600">
           <div>From: {formatDateTime(version.effectiveFrom)}</div>
@@ -111,7 +118,7 @@ export const RuleSetDetailPage = () => {
     {
       title: "Business Summary",
       key: "summary",
-      width: 420,
+      width: 240,
       render: (_, version) => (
         <div className="whitespace-normal break-words">
           <VersionSummary version={version} />
@@ -119,24 +126,13 @@ export const RuleSetDetailPage = () => {
       )
     },
     {
-      title: "",
+      title: "Actions",
       key: "actions",
-      width: 70,
-      align: "center",
+      width: 130,
       render: (_, version) => (
-        <VersionRowActionMenu
-          isMobile={isMobile}
-          onViewDetail={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}
-          onEditMetadata={() => navigate(`/rules/${ruleSetId}/versions/${version.id}/edit`)}
-          onNewVersionFromConfig={
-            version.builderType === "MATCH_STAKES_PAYOUT"
-              ? () =>
-                  navigate(
-                    `/rules/${ruleSetId}/versions/new?fromVersionId=${version.id}`
-                  )
-              : undefined
-          }
-        />
+        <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}>
+          View detail
+        </Button>
       )
     }
   ];
@@ -150,27 +146,26 @@ export const RuleSetDetailPage = () => {
         ]}
       />
 
-      <header className="flex flex-wrap items-start justify-between gap-3 lg:gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-bold tracking-tight text-slate-900 lg:text-2xl">
-              {data.name}
-            </h2>
-            <RuleSetStatusBadges status={data.status} isDefault={data.isDefault} />
-          </div>
-          <p className="text-sm text-slate-500">
-            {data.description || "No description provided."}
-          </p>
-        </div>
-
-        <div className="flex w-full justify-end sm:w-auto">
-          <Button onClick={() => navigate(`/rules/${ruleSetId}/edit`)}>
+      <header className="mb-4 flex w-full justify-end">
+        <div className="flex gap-2">
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rules")}>
+            Back
+          </Button>
+          <Button
+            type="primary"
+            icon={<EditOutlined />}
+            onClick={() => navigate(`/rules/${ruleSetId}/edit`)}
+          >
             Edit rule
           </Button>
         </div>
       </header>
 
-      <SectionCard title={data.name} description={data.description || "No description provided."}>
+      <SectionCard
+        title={data.name}
+        description={data.description || "No description provided."}
+        actions={<RuleSetStatusBadges status={data.status} isDefault={data.isDefault} />}
+      >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <MetaItem label="Module" value={moduleLabels[data.module]} />
           <MetaItem label="Created" value={formatDateTime(data.createdAt)} />
@@ -190,7 +185,7 @@ export const RuleSetDetailPage = () => {
             pagination={false}
             size="middle"
             locale={{ emptyText: "No versions yet" }}
-            scroll={{ x: 980 }}
+            scroll={{ x: 1080 }}
           />
         </div>
       </SectionCard>

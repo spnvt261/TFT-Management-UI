@@ -1,75 +1,15 @@
 import { apiGet, apiPatch, apiPost } from "@/api/httpClient";
 import type {
-  ConditionOperator,
   CreateRuleSetRequest,
   CreateRuleSetVersionRequest,
   DefaultRuleSetByModuleDto,
   ListRuleSetsQuery,
-  MatchStakesBuilderConfig,
   ModuleType,
-  RuleActionType,
-  RuleBuilderType,
-  RuleConditionKey,
-  RuleInput,
-  RuleStatus,
   RuleSetDetailDto,
   RuleSetDto,
   RuleSetVersionDetailDto,
-  SelectorType,
-  UpdateRuleSetRequest,
-  UpdateRuleSetVersionRequest
+  UpdateRuleSetRequest
 } from "@/types/api";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const toSummaryRecordOrNull = (value: unknown): Record<string, unknown> | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return isRecord(value) ? value : null;
-};
-
-const toBuilderConfigOrNull = (
-  value: unknown
-): MatchStakesBuilderConfig | Record<string, unknown> | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return isRecord(value) ? value : null;
-};
-
-const toRuleBuilderType = (value: string | null): RuleBuilderType | null =>
-  value === "MATCH_STAKES_PAYOUT" ? value : null;
-
-const toRuleInput = (rule: RuleSetVersionDetailDto["rules"][number]): RuleInput => ({
-  code: rule.code,
-  name: rule.name,
-  description: rule.description,
-  ruleKind: rule.ruleKind as RuleInput["ruleKind"],
-  priority: rule.priority,
-  status: rule.status as RuleStatus,
-  stopProcessingOnMatch: rule.stopProcessingOnMatch,
-  metadata: isRecord(rule.metadata) ? rule.metadata : null,
-  conditions: rule.conditions.map((condition) => ({
-    conditionKey: condition.conditionKey as RuleConditionKey,
-    operator: condition.operator as ConditionOperator,
-    valueJson: condition.valueJson,
-    sortOrder: condition.sortOrder
-  })),
-  actions: rule.actions.map((action) => ({
-    actionType: action.actionType as RuleActionType,
-    amountVnd: action.amountVnd,
-    sourceSelectorType: action.sourceSelectorType as SelectorType,
-    sourceSelectorJson: action.sourceSelectorJson,
-    destinationSelectorType: action.destinationSelectorType as SelectorType,
-    destinationSelectorJson: action.destinationSelectorJson,
-    descriptionTemplate: action.descriptionTemplate,
-    sortOrder: action.sortOrder
-  }))
-});
 
 const findVersion = (detail: RuleSetDetailDto, versionId: string) => {
   const version = detail.versions.find((item) => item.id === versionId);
@@ -118,31 +58,6 @@ export const rulesApi = {
   getVersion: async (ruleSetId: string, versionId: string) => {
     const detail = await rulesApi.detail(ruleSetId);
     return findVersion(detail, versionId);
-  },
-  updateVersion: async (ruleSetId: string, versionId: string, payload: UpdateRuleSetVersionRequest) => {
-    const detail = await rulesApi.detail(ruleSetId);
-    const sourceVersion = findVersion(detail, versionId);
-    const sourceBuilderType = toRuleBuilderType(sourceVersion.builderType);
-    const updated = await rulesApi.update(ruleSetId, {
-      description: sourceVersion.description,
-      participantCountMin: sourceVersion.participantCountMin,
-      participantCountMax: sourceVersion.participantCountMax,
-      effectiveTo: payload.effectiveTo ?? sourceVersion.effectiveTo,
-      isActive: payload.isActive ?? sourceVersion.isActive,
-      summaryJson:
-        payload.summaryJson === undefined
-          ? toSummaryRecordOrNull(sourceVersion.summaryJson)
-          : payload.summaryJson,
-      builderType: sourceBuilderType,
-      builderConfig: sourceBuilderType ? toBuilderConfigOrNull(sourceVersion.builderConfig) : null,
-      rules: sourceBuilderType ? undefined : sourceVersion.rules.map(toRuleInput)
-    });
-
-    if (!updated.latestVersion) {
-      throw new Error(`Cannot resolve latest version after updating metadata for version ${versionId}`);
-    }
-
-    return updated.latestVersion;
   },
   getDefaultByModule: async (module: ModuleType, participantCount?: 3 | 4) => {
     const response = await apiGet<DefaultRuleSetByModuleDto>(`/rule-sets/default/by-module/${module}`, {

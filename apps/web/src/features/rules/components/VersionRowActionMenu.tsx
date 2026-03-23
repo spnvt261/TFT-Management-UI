@@ -36,7 +36,7 @@ export const VersionRowActionMenu = ({
         : []),
       {
         key: "edit",
-        label: "Edit metadata",
+        label: "Save metadata",
         onClick: onEditMetadata
       }
     ],
@@ -86,7 +86,7 @@ export const VersionRowActionMenu = ({
                 onEditMetadata();
               }}
             >
-              Edit metadata
+              Save metadata
             </Button>
           </div>
         </Modal>

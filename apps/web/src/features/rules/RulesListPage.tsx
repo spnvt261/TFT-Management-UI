@@ -195,34 +195,35 @@ export const RulesListPage = () => {
       title: "Rule Set",
       dataIndex: "name",
       key: "name",
+      width: 200,
       render: (_, record) => (
         <div>
-          <div className="font-medium text-slate-900">{record.name}</div>
-          <div className="text-xs text-slate-500">{record.code}</div>
-          <div className="text-xs text-slate-500">{record.description || "No description"}</div>
+          <Button
+            type="link"
+            className="!h-auto !px-0 !font-medium underline"
+            onClick={() => navigate(`/rules/${record.id}`)}
+          >
+            {record.name}
+          </Button>
+          <div className="text-xs text-slate-500 truncate max-w-[200px]">
+            {record.description || "No description"}
+          </div>
         </div>
       )
     },
     {
-      title: "Module",
-      dataIndex: "module",
-      key: "module",
-      width: 140,
-      render: (value: RuleSetDto["module"]) => <Tag>{moduleLabels[value]}</Tag>
-    },
-    {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      width: 130,
-      render: (value: RuleSetDto["status"]) => <Tag color={value === "ACTIVE" ? "green" : "default"}>{ruleStatusLabels[value]}</Tag>
-    },
-    {
-      title: "Default",
-      dataIndex: "isDefault",
-      key: "isDefault",
-      width: 110,
-      render: (value: boolean) => (value ? <Tag color="blue">Default</Tag> : <span className="text-xs text-slate-400">No</span>)
+      title: "Tags",
+      key: "tags",
+      width: 200,
+      render: (_, record) => (
+        <div className="flex flex-wrap gap-1">
+          <Tag>{moduleLabels[record.module]}</Tag>
+          <Tag color={record.status === "ACTIVE" ? "green" : "default"}>
+            {ruleStatusLabels[record.status]}
+          </Tag>
+          {record.isDefault ? <Tag color="blue">Default</Tag> : null}
+        </div>
+      )
     },
     {
       title: "Latest Version",
@@ -429,8 +430,13 @@ export const RulesListPage = () => {
               <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="font-semibold text-slate-900">{item.name}</div>
-                    <div className="text-xs text-slate-500">{item.code}</div>
+                    <Button
+                      type="link"
+                      className="!h-auto !px-0 !font-semibold"
+                      onClick={() => navigate(`/rules/${item.id}`)}
+                    >
+                      {item.name}
+                    </Button>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1">
                     <Tag>{moduleLabels[item.module]}</Tag>
@@ -439,7 +445,9 @@ export const RulesListPage = () => {
                   </div>
                 </div>
 
-                <div className="mt-2 text-sm text-slate-600">{item.description || "No description"}</div>
+                <div className="mt-2 text-sm text-slate-600 truncate">
+                  {item.description || "No description"}
+                </div>
                 <div className="mt-2 rounded-lg bg-slate-50 p-2">
                   <LatestVersionSummary ruleSetId={item.id} />
                 </div>

@@ -4,7 +4,6 @@ import { useRuleSetVersionDetail } from "@/features/rules/hooks";
 import {
   formatAmountVnd,
   formatPenaltyDestination,
-  formatRankAmountLine,
   normalizeMatchStakesBuilderConfig,
   summarizeMatchStakesBuilder
 } from "@/features/rules/builder-utils";
@@ -35,6 +34,11 @@ export const RuleSetVersionDetailPage = () => {
   const version = versionQuery.data;
   const builderConfig = version.builderType === "MATCH_STAKES_PAYOUT" ? normalizeMatchStakesBuilderConfig(version.builderConfig) : null;
   const builderSummary = builderConfig ? summarizeMatchStakesBuilder(builderConfig) : null;
+  const participantLabel =
+    version.participantCountMin === version.participantCountMax
+      ? `${version.participantCountMin}`
+      : `${version.participantCountMin} - ${version.participantCountMax}`;
+  const formatAmountDong = (amount: number) => `${formatAmountVnd(amount)}đ`;
 
   return (
     <PageContainer>
@@ -42,14 +46,9 @@ export const RuleSetVersionDetailPage = () => {
         title={`Rule Version v${version.versionNo}`}
         subtitle="Business builder summary and compiled rules"
         actions={
-          <>
-            {builderConfig ? (
-              <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/new?fromVersionId=${version.id}`)}>
-                Create New Version From This Config
-              </Button>
-            ) : null}
-            <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}/edit`)}>Edit metadata</Button>
-          </>
+          <Button onClick={() => navigate(`/rules/${ruleSetId}`)}>
+            Back
+          </Button>
         }
       />
 
@@ -70,11 +69,37 @@ export const RuleSetVersionDetailPage = () => {
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <Card size="small" title="Payouts">
-                <div className="text-sm text-slate-700">{formatRankAmountLine(builderConfig.payouts, "payout")}</div>
+                <div className="space-y-2">
+                  {builderConfig.payouts
+                    .slice()
+                    .sort((a, b) => a.relativeRank - b.relativeRank)
+                    .map((item) => (
+                      <div
+                        key={`payout-${item.relativeRank}`}
+                        className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2"
+                      >
+                        <div className="text-sm font-medium text-emerald-900">{`Rank ${item.relativeRank}`}</div>
+                        <div className="text-sm font-semibold text-emerald-700">{`+${formatAmountDong(item.amountVnd)}`}</div>
+                      </div>
+                    ))}
+                </div>
               </Card>
 
               <Card size="small" title="Losses">
-                <div className="text-sm text-slate-700">{formatRankAmountLine(builderConfig.losses, "loss")}</div>
+                <div className="space-y-2">
+                  {builderConfig.losses
+                    .slice()
+                    .sort((a, b) => a.relativeRank - b.relativeRank)
+                    .map((item) => (
+                      <div
+                        key={`loss-${item.relativeRank}`}
+                        className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2"
+                      >
+                        <div className="text-sm font-medium text-rose-900">{`Rank ${item.relativeRank}`}</div>
+                        <div className="text-sm font-semibold text-rose-700">{`-${formatAmountDong(item.amountVnd)}`}</div>
+                      </div>
+                    ))}
+                </div>
               </Card>
             </div>
 
@@ -86,7 +111,7 @@ export const RuleSetVersionDetailPage = () => {
                   renderItem={(penalty) => (
                     <List.Item>
                       <div className="text-sm text-slate-700">
-                        top{penalty.absolutePlacement} pays extra {formatAmountVnd(penalty.amountVnd)} to {formatPenaltyDestination(penalty.destinationSelectorType)}
+                        top{penalty.absolutePlacement} pays extra {formatAmountDong(penalty.amountVnd)} to {formatPenaltyDestination(penalty.destinationSelectorType)}
                       </div>
                     </List.Item>
                   )}
@@ -114,7 +139,7 @@ export const RuleSetVersionDetailPage = () => {
             <Tag color={version.isActive ? "green" : "default"}>{version.isActive ? "Active" : "Inactive"}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="Participants">
-            {version.participantCountMin} - {version.participantCountMax}
+            {participantLabel}
           </Descriptions.Item>
           <Descriptions.Item label="Builder type">{version.builderType || "RAW"}</Descriptions.Item>
           <Descriptions.Item label="Effective from">{formatDateTime(version.effectiveFrom)}</Descriptions.Item>
@@ -162,7 +187,7 @@ export const RuleSetVersionDetailPage = () => {
                       {rule.actions.map((action, actionIndex) => (
                         <div key={action.id ?? `${actionIndex}`} className="rounded-lg bg-slate-50 p-2 text-xs">
                           <div>
-                            {action.actionType} - {formatAmountVnd(action.amountVnd)} VND
+                            {action.actionType} - {formatAmountDong(action.amountVnd)}
                           </div>
                           <div className="mt-1">
                             {action.sourceSelectorType} to {action.destinationSelectorType}

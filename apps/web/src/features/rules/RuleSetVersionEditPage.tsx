@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { Alert, Button, Card, DatePicker, Input, Switch, message } from "antd";
 import dayjs from "dayjs";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
-import { useRuleSetVersionDetail, useUpdateRuleSetVersion } from "@/features/rules/hooks";
+import {
+  useRuleSetDetail,
+  useRuleSetVersionDetail,
+  useUpdateRuleSet
+} from "@/features/rules/hooks";
 import { parseJsonOrDefault, ruleSetVersionMetaSchema, type RuleSetVersionMetaValues } from "@/features/rules/schemas";
 import { FormApiError } from "@/components/common/FormApiError";
 import { ErrorState } from "@/components/states/ErrorState";
@@ -13,6 +17,17 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { getErrorMessage } from "@/lib/error-messages";
 import { toAppError } from "@/api/httpClient";
+import type {
+  ConditionOperator,
+  MatchStakesBuilderConfig,
+  RuleActionType,
+  RuleBuilderType,
+  RuleConditionKey,
+  RuleInput,
+  RuleSetVersionDetailDto,
+  RuleStatus,
+  SelectorType
+} from "@/types/api";
 
 const parseRecordJson = (value?: string | null): Record<string, unknown> | null => {
   if (!value) {
@@ -27,13 +42,59 @@ const parseRecordJson = (value?: string | null): Record<string, unknown> | null 
   return null;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const toRuleBuilderType = (value: string | null): RuleBuilderType | null =>
+  value === "MATCH_STAKES_PAYOUT" ? value : null;
+
+const toBuilderConfigOrNull = (
+  value: unknown
+): MatchStakesBuilderConfig | Record<string, unknown> | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return isRecord(value) ? value : null;
+};
+
+const toRuleInput = (rule: RuleSetVersionDetailDto["rules"][number]): RuleInput => ({
+  code: rule.code,
+  name: rule.name,
+  description: rule.description,
+  ruleKind: rule.ruleKind as RuleInput["ruleKind"],
+  priority: rule.priority,
+  status: rule.status as RuleStatus,
+  stopProcessingOnMatch: rule.stopProcessingOnMatch,
+  metadata: isRecord(rule.metadata) ? rule.metadata : null,
+  conditions: rule.conditions.map((condition) => ({
+    conditionKey: condition.conditionKey as RuleConditionKey,
+    operator: condition.operator as ConditionOperator,
+    valueJson: condition.valueJson,
+    sortOrder: condition.sortOrder
+  })),
+  actions: rule.actions.map((action) => ({
+    actionType: action.actionType as RuleActionType,
+    amountVnd: action.amountVnd,
+    sourceSelectorType: action.sourceSelectorType as SelectorType,
+    sourceSelectorJson: action.sourceSelectorJson,
+    destinationSelectorType: action.destinationSelectorType as SelectorType,
+    destinationSelectorJson: action.destinationSelectorJson,
+    descriptionTemplate: action.descriptionTemplate,
+    sortOrder: action.sortOrder
+  }))
+});
+
+const stringifyStable = (value: unknown) => JSON.stringify(value ?? null);
+
 export const RuleSetVersionEditPage = () => {
   const navigate = useNavigate();
   const { ruleSetId, versionId } = useParams();
   const [apiError, setApiError] = useState<string | null>(null);
 
   const detailQuery = useRuleSetVersionDetail(ruleSetId, versionId);
-  const updateMutation = useUpdateRuleSetVersion(ruleSetId ?? "", versionId ?? "");
+  const ruleSetQuery = useRuleSetDetail(ruleSetId);
+  const updateMutation = useUpdateRuleSet(ruleSetId ?? "");
 
   const form = useForm<RuleSetVersionMetaValues>({
     resolver: zodResolver(ruleSetVersionMetaSchema),
@@ -43,18 +104,38 @@ export const RuleSetVersionEditPage = () => {
       summaryJsonText: detailQuery.data?.summaryJson ? JSON.stringify(detailQuery.data.summaryJson, null, 2) : ""
     }
   });
+  const watchedIsActive = useWatch({ control: form.control, name: "isActive" });
+  const watchedEffectiveTo = useWatch({ control: form.control, name: "effectiveTo" });
+  const watchedSummaryJsonText = useWatch({ control: form.control, name: "summaryJsonText" });
 
   if (!ruleSetId || !versionId) {
     return <ErrorState title="Missing params" />;
   }
 
-  if (detailQuery.isLoading) {
+  if (detailQuery.isLoading || ruleSetQuery.isLoading) {
     return <PageLoading label="Loading version..." />;
   }
 
-  if (detailQuery.isError || !detailQuery.data) {
-    return <ErrorState onRetry={() => void detailQuery.refetch()} />;
+  if (detailQuery.isError || !detailQuery.data || ruleSetQuery.isError || !ruleSetQuery.data) {
+    return (
+      <ErrorState
+        onRetry={() => {
+          void detailQuery.refetch();
+          void ruleSetQuery.refetch();
+        }}
+      />
+    );
   }
+
+  const initialEffectiveTo = detailQuery.data.effectiveTo ?? "";
+  const initialSummaryJson = detailQuery.data.summaryJson
+    ? stringifyStable(detailQuery.data.summaryJson)
+    : stringifyStable(null);
+  const currentSummaryJson = stringifyStable(parseRecordJson(watchedSummaryJsonText));
+  const hasChanges =
+    watchedIsActive !== detailQuery.data.isActive ||
+    (watchedEffectiveTo ?? "") !== initialEffectiveTo ||
+    currentSummaryJson !== initialSummaryJson;
 
   return (
     <PageContainer>
@@ -73,13 +154,32 @@ export const RuleSetVersionEditPage = () => {
           onSubmit={form.handleSubmit(async (values) => {
             setApiError(null);
             try {
-              const createdVersion = await updateMutation.mutateAsync({
-                isActive: values.isActive,
+              const sourceVersion = detailQuery.data;
+              const sourceBuilderType = toRuleBuilderType(sourceVersion.builderType);
+              const updatedRuleSet = await updateMutation.mutateAsync({
+                name: ruleSetQuery.data.name,
+                status: ruleSetQuery.data.status,
+                isDefault: ruleSetQuery.data.isDefault,
+                description: sourceVersion.description ?? ruleSetQuery.data.description ?? null,
+                participantCountMin: sourceVersion.participantCountMin,
+                participantCountMax: sourceVersion.participantCountMax,
                 effectiveTo: values.effectiveTo || null,
-                summaryJson: parseRecordJson(values.summaryJsonText)
+                isActive: values.isActive,
+                summaryJson: parseRecordJson(values.summaryJsonText),
+                builderType: sourceBuilderType,
+                builderConfig: sourceBuilderType
+                  ? toBuilderConfigOrNull(sourceVersion.builderConfig)
+                  : null,
+                rules: sourceBuilderType ? undefined : sourceVersion.rules.map(toRuleInput)
               });
-              message.success("New version created from metadata update");
-              navigate(`/rules/${ruleSetId}/versions/${createdVersion.id}`);
+              const latestVersionId = updatedRuleSet.latestVersion?.id;
+              message.success("Saved. New version created.");
+              if (latestVersionId) {
+                navigate(`/rules/${ruleSetId}/versions/${latestVersionId}`);
+                return;
+              }
+
+              navigate(`/rules/${ruleSetId}`);
             } catch (error) {
               setApiError(getErrorMessage(toAppError(error)));
             }
@@ -117,8 +217,13 @@ export const RuleSetVersionEditPage = () => {
             ) : null}
           </div>
 
-          <Button type="primary" htmlType="submit" loading={updateMutation.isPending}>
-            Save metadata
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={updateMutation.isPending}
+            disabled={!hasChanges}
+          >
+            Save
           </Button>
         </form>
       </Card>

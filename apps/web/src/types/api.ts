@@ -342,12 +342,6 @@ export interface CreateRuleSetVersionRequest {
   rules?: RuleInput[];
 }
 
-export interface UpdateRuleSetVersionRequest {
-  isActive?: boolean;
-  effectiveTo?: string | null;
-  summaryJson?: Record<string, unknown> | null;
-}
-
 export interface DefaultRuleSetByModuleDto {
   ruleSet: RuleSetDto;
   activeVersion: RuleSetVersionDetailDto | null;

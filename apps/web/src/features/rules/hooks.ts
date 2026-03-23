@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { rulesApi } from "@/api/rulesApi";
 import { queryKeys } from "@/api/queryKeys";
 import { invalidateAfterRuleMutation } from "@/lib/invalidation";
-import type { CreateRuleSetRequest, CreateRuleSetVersionRequest, ListRuleSetsQuery, UpdateRuleSetRequest, UpdateRuleSetVersionRequest } from "@/types/api";
+import type { CreateRuleSetRequest, CreateRuleSetVersionRequest, ListRuleSetsQuery, UpdateRuleSetRequest } from "@/types/api";
 
 export const useRuleSets = (query: ListRuleSetsQuery) =>
   useQuery({
@@ -95,18 +95,6 @@ export const useCreateRuleSetVersionById = () => {
     onSuccess: async (_, variables) => {
       await invalidateAfterRuleMutation(queryClient);
       await queryClient.invalidateQueries({ queryKey: queryKeys.rules.detail(variables.ruleSetId) });
-    }
-  });
-};
-
-export const useUpdateRuleSetVersion = (ruleSetId: string, versionId: string) => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: UpdateRuleSetVersionRequest) => rulesApi.updateVersion(ruleSetId, versionId, payload),
-    onSuccess: async () => {
-      await invalidateAfterRuleMutation(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.rules.version(ruleSetId, versionId) });
     }
   });
 };
