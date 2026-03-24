@@ -617,6 +617,52 @@ export interface DebtPeriodListItemDto extends DebtPeriodDto {
   totalOutstandingPayVnd: number;
 }
 
+export interface DebtPeriodTimelinePlayerRowDto {
+  playerId: string;
+  playerName: string;
+  tftPlacement: number | null;
+  relativeRank: number | null;
+  matchNetVnd: number;
+  cumulativeNetVnd: number;
+  placementLabel?: string | null;
+}
+
+export interface DebtPeriodTimelineItemDto {
+  type: "MATCH" | "INITIAL";
+  matchId: string | null;
+  playedAt: string | null;
+  matchNo: number | null;
+  participantCount: number | null;
+  status: string | null;
+  rows: DebtPeriodTimelinePlayerRowDto[];
+}
+
+export interface DebtPeriodTimelineMatchDto {
+  matchId: string;
+  playedAt: string;
+  matchNo: number | null;
+  label: string | null;
+  players: DebtPeriodTimelinePlayerRowDto[];
+}
+
+export interface DebtPeriodTimelineDto {
+  period: DebtPeriodDto;
+  summary: DebtPeriodSummaryDto;
+  players: DebtPeriodPlayerSummaryDto[];
+  history: DebtPeriodTimelineMatchDto[];
+  initialRows: DebtPeriodTimelinePlayerRowDto[];
+}
+
+export interface DebtPeriodTimelineApiDto {
+  period: DebtPeriodDto;
+  summary: DebtPeriodSummaryDto;
+  currentPlayers?: DebtPeriodPlayerSummaryDto[];
+  timeline?: DebtPeriodTimelineItemDto[];
+  // legacy compatibility
+  players?: DebtPeriodPlayerSummaryDto[];
+  history?: DebtPeriodTimelineMatchDto[];
+}
+
 export interface CreateDebtPeriodRequest {
   title?: string | null;
   note?: string | null;

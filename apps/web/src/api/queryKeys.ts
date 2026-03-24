@@ -26,8 +26,10 @@ export const queryKeys = {
     ledger: (query: unknown) => ["match-stakes", "ledger", query] as const,
     matches: (query: unknown) => ["match-stakes", "matches", query] as const,
     currentPeriod: ["match-stakes", "debt-periods", "current"] as const,
+    allPeriods: ["match-stakes", "debt-periods", "all"] as const,
     periods: (query: unknown) => ["match-stakes", "debt-periods", "list", query] as const,
-    periodDetail: (periodId: string) => ["match-stakes", "debt-periods", "detail", periodId] as const
+    periodDetail: (periodId: string) => ["match-stakes", "debt-periods", "detail", periodId] as const,
+    periodTimeline: (periodId: string) => ["match-stakes", "debt-periods", "timeline", periodId] as const
   },
   groupFund: {
     summary: (query: unknown) => ["group-fund", "summary", query] as const,

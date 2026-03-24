@@ -1,5 +1,6 @@
-import { apiGet, apiPost } from "@/api/httpClient";
+import { apiGet, apiPost, httpClient } from "@/api/httpClient";
 import type {
+  ApiSuccessResponse,
   CloseDebtPeriodRequest,
   CloseDebtPeriodResultDto,
   CreateDebtPeriodRequest,
@@ -9,6 +10,7 @@ import type {
   DebtPeriodDetailDto,
   DebtPeriodDto,
   DebtPeriodListItemDto,
+  DebtPeriodTimelineApiDto,
   ListDebtPeriodsQuery,
   MatchListItemDto,
   MatchStakesLedgerItemDto,
@@ -33,6 +35,18 @@ export const matchStakesApi = {
   periodDetail: async (periodId: string) => {
     const response = await apiGet<DebtPeriodDetailDto>(`/match-stakes/debt-periods/${periodId}`);
     return response.data;
+  },
+  periodTimeline: async (periodId: string, options?: { includeInitialSnapshot?: boolean }): Promise<DebtPeriodTimelineApiDto | null> => {
+    const response = await httpClient.get<ApiSuccessResponse<DebtPeriodTimelineApiDto>>(`/match-stakes/debt-periods/${periodId}/timeline`, {
+      params: options,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 404 || status === 405 || status === 501
+    });
+
+    if (response.status >= 200 && response.status < 300) {
+      return response.data.data;
+    }
+
+    return null;
   },
   createPeriod: async (payload: CreateDebtPeriodRequest) => {
     const response = await apiPost<DebtPeriodDto, CreateDebtPeriodRequest>("/match-stakes/debt-periods", payload);

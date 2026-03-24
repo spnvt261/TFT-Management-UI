@@ -1,50 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import {
-  Alert,
-  Button,
-  DatePicker,
-  Drawer,
-  Input,
-  InputNumber,
-  List,
-  Modal,
-  Pagination,
-  Select,
-  Skeleton,
-  Table,
-  Tabs,
-  Tag,
-  Tooltip,
-  message
-} from "antd";
-import type { TableColumnsType } from "antd";
+  AppstoreOutlined,
+  DeleteOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  FilterOutlined,
+  PlusOutlined,
+  UnorderedListOutlined
+} from "@ant-design/icons";
+import { Alert, Button, DatePicker, Input, InputNumber, Modal, Select, Skeleton, Tag, Tooltip, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { toAppError } from "@/api/httpClient";
 import { FormApiError } from "@/components/common/FormApiError";
 import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
-import { MetricCard } from "@/components/layout/MetricCard";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
 import { EmptyState } from "@/components/states/EmptyState";
 import { ErrorState } from "@/components/states/ErrorState";
 import {
+  useAllDebtPeriods,
   useCloseDebtPeriod,
   useCreateDebtPeriod,
   useCreateDebtSettlement,
   useCurrentDebtPeriod,
-  useDebtPeriodDetail,
-  useDebtPeriods,
-  useMatchStakesMatches
+  useDebtPeriodTimeline
 } from "@/features/match-stakes/hooks";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
-import { useIsMobile } from "@/hooks/useIsMobile";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd } from "@/lib/format";
-import { debtPeriodStatusLabels, getEnumLabel, matchStatusLabels } from "@/lib/labels";
-import type { CreateDebtSettlementLineRequest, DebtPeriodPlayerSummaryDto, MatchListItemDto } from "@/types/api";
+import { debtPeriodStatusLabels, getEnumLabel } from "@/lib/labels";
+import type { CreateDebtSettlementLineRequest, DebtPeriodPlayerSummaryDto, DebtPeriodTimelinePlayerRowDto } from "@/types/api";
 
 type SettlementLineForm = {
   localId: number;
@@ -53,6 +40,10 @@ type SettlementLineForm = {
   amountVnd?: number;
   note: string;
 };
+
+type HistoryViewMode = "minimal" | "detail";
+
+const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.match-stakes.history.view-mode";
 
 const createSettlementLine = (localId: number): SettlementLineForm => ({
   localId,
@@ -69,6 +60,18 @@ const getOutstandingClassName = (amount: number) => {
   }
 
   return "text-slate-700";
+};
+
+const getDebtCardToneClassName = (amount: number) => {
+  if (amount > 0) {
+    return "border-emerald-300 bg-emerald-50/80";
+  }
+
+  if (amount < 0) {
+    return "border-rose-300 bg-rose-50/80";
+  }
+
+  return "border-amber-300 bg-amber-50/80";
 };
 
 const sortOutstandingPlayers = (players: DebtPeriodPlayerSummaryDto[]) => {
@@ -96,6 +99,14 @@ const sortOutstandingPlayers = (players: DebtPeriodPlayerSummaryDto[]) => {
   return next;
 };
 
+const sortTimelineRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
+  const next = [...rows];
+
+  next.sort((left, right) => left.playerName.localeCompare(right.playerName));
+
+  return next;
+};
+
 const isSettlementLineValid = (line: SettlementLineForm) => {
   if (!line.payerPlayerId || !line.receiverPlayerId) {
     return false;
@@ -115,42 +126,65 @@ const isSettlementLineValid = (line: SettlementLineForm) => {
 const hasAnyOutstandingBalance = (totalOutstandingReceiveVnd: number, totalOutstandingPayVnd: number) =>
   totalOutstandingReceiveVnd !== 0 || totalOutstandingPayVnd !== 0;
 
-const renderMatchCard = (item: MatchListItemDto, onOpen: (matchId: string) => void) => (
-  <button
-    key={item.id}
-    className="focus-ring w-full rounded-xl border border-slate-200/90 bg-white p-3 text-left transition hover:border-brand-500"
-    onClick={() => onOpen(item.id)}
-  >
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="text-sm font-semibold">{formatDateTime(item.playedAt)}</div>
-      <div className="flex items-center gap-2">
-        <Tag>{`v${item.ruleSetVersionNo}`}</Tag>
-        <Tag>{getEnumLabel(matchStatusLabels, item.status)}</Tag>
-        {item.confirmationMode === "MANUAL_ADJUSTED" ? <Tag color="orange">Manual</Tag> : <Tag color="blue">Engine</Tag>}
-      </div>
-    </div>
+const formatSignedVnd = (value: number) => (value > 0 ? `+${formatVnd(value)}` : formatVnd(value));
 
-    <div className="mt-1 text-xs text-slate-500">{item.ruleSetName}</div>
-    <div className="mt-2 text-xs text-slate-600">
-      {item.participants.map((participant) => `${participant.playerName} #${participant.tftPlacement}`).join(" | ")}
-    </div>
-    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-      <span>{`Participants: ${item.participantCount}`}</span>
-      <span>{`Transfer: ${formatVnd(item.totalTransferVnd)}`}</span>
-    </div>
-    {item.notePreview ? <div className="mt-1 text-xs text-slate-500">{item.notePreview}</div> : null}
-  </button>
-);
+const getTimelinePlacementRank = (row: DebtPeriodTimelinePlayerRowDto) => {
+  if (typeof row.tftPlacement === "number") {
+    return row.tftPlacement;
+  }
+
+  if (typeof row.relativeRank === "number") {
+    return row.relativeRank;
+  }
+
+  return null;
+};
+
+const getTimelinePlacementLabel = (row: DebtPeriodTimelinePlayerRowDto) => {
+  if (row.placementLabel) {
+    return row.placementLabel;
+  }
+
+  const rank = getTimelinePlacementRank(row);
+  if (typeof rank === "number") {
+    return `top${rank}`;
+  }
+
+  return null;
+};
+
+const getPlacementToneClassName = (row: DebtPeriodTimelinePlayerRowDto) => {
+  const rank = getTimelinePlacementRank(row);
+  if (rank === 1) {
+    return "text-amber-600";
+  }
+
+  if (rank === 2) {
+    return "text-sky-600";
+  }
+
+  if (rank === 3) {
+    return "text-emerald-600";
+  }
+
+  return "text-slate-500";
+};
 
 export const MatchStakesPage = () => {
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
 
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
-  const [matchesPage, setMatchesPage] = useState(1);
-  const [periodsPage, setPeriodsPage] = useState(1);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>();
-  const [periodDrawerOpen, setPeriodDrawerOpen] = useState(false);
+  const [showDebtPeriodDetail, setShowDebtPeriodDetail] = useState(false);
+  const [periodFilterOpen, setPeriodFilterOpen] = useState(false);
+  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(() => {
+    if (typeof window === "undefined") {
+      return "minimal";
+    }
+
+    const saved = window.localStorage.getItem(HISTORY_VIEW_MODE_STORAGE_KEY);
+    return saved === "detail" ? "detail" : "minimal";
+  });
 
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementApiError, setSettlementApiError] = useState<string | null>(null);
@@ -167,31 +201,53 @@ export const MatchStakesPage = () => {
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
   const [closePeriodApiError, setClosePeriodApiError] = useState<string | null>(null);
   const [closePeriodNote, setClosePeriodNote] = useState("");
+  const [closePeriodConfirmText, setClosePeriodConfirmText] = useState("");
 
   const currentPeriodQuery = useCurrentDebtPeriod();
-  const periodsQuery = useDebtPeriods({ page: periodsPage, pageSize: 12 });
-
-  const currentPeriod = currentPeriodQuery.data;
-  const openPeriod = currentPeriod?.period;
-  const openPeriodId = openPeriod?.id;
-
-  const currentPeriodDetailQuery = useDebtPeriodDetail(openPeriodId);
-  const matchesQuery = useMatchStakesMatches({ periodId: openPeriodId, page: matchesPage, pageSize: 12 }, Boolean(openPeriodId));
-  const selectedPeriodDetailQuery = useDebtPeriodDetail(selectedPeriodId);
+  const allPeriodsQuery = useAllDebtPeriods();
+  const selectedPeriodTimelineQuery = useDebtPeriodTimeline(selectedPeriodId);
 
   const createSettlementMutation = useCreateDebtSettlement();
   const closePeriodMutation = useCloseDebtPeriod();
   const createPeriodMutation = useCreateDebtPeriod();
 
-  useEffect(() => {
-    setMatchesPage(1);
-  }, [openPeriodId]);
+  const openPeriodId = currentPeriodQuery.data?.period?.id;
+  const hasOpenPeriod = Boolean(openPeriodId);
 
-  const sortedPlayers = useMemo(() => sortOutstandingPlayers(currentPeriod?.players ?? []), [currentPeriod?.players]);
-  const currentSummary = currentPeriod?.summary;
-  const hasOutstanding = hasAnyOutstandingBalance(
-    currentSummary?.totalOutstandingReceiveVnd ?? 0,
-    currentSummary?.totalOutstandingPayVnd ?? 0
+  const allPeriods = allPeriodsQuery.data ?? [];
+
+  useEffect(() => {
+    if (allPeriods.length === 0) {
+      setSelectedPeriodId(undefined);
+      return;
+    }
+
+    setSelectedPeriodId((current) => {
+      if (current && allPeriods.some((period) => period.id === current)) {
+        return current;
+      }
+
+      if (openPeriodId && allPeriods.some((period) => period.id === openPeriodId)) {
+        return openPeriodId;
+      }
+
+      return allPeriods[0].id;
+    });
+  }, [allPeriods, openPeriodId]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(HISTORY_VIEW_MODE_STORAGE_KEY, historyViewMode);
+    }
+  }, [historyViewMode]);
+
+  const selectedTimeline = selectedPeriodTimelineQuery.data;
+  const selectedPeriod = selectedTimeline?.period;
+  const selectedSummary = selectedTimeline?.summary;
+  const sortedPlayers = useMemo(() => sortOutstandingPlayers(selectedTimeline?.players ?? []), [selectedTimeline?.players]);
+  const initialPlayers = useMemo(
+    () => sortTimelineRows(selectedTimeline?.initialRows ?? []),
+    [selectedTimeline?.initialRows]
   );
 
   const settlementPlayerOptions = sortedPlayers.map((player) => ({
@@ -199,8 +255,16 @@ export const MatchStakesPage = () => {
     value: player.playerId
   }));
 
+  const closePeriodTargetId = selectedPeriod?.status === "OPEN" ? selectedPeriod.id : undefined;
+  const hasOutstanding = hasAnyOutstandingBalance(
+    selectedSummary?.totalOutstandingReceiveVnd ?? 0,
+    selectedSummary?.totalOutstandingPayVnd ?? 0
+  );
+
   const settlementFormValid = settlementLines.length > 0 && settlementLines.every(isSettlementLineValid);
-  const canSubmitSettlement = Boolean(openPeriodId) && settlementFormValid && !createSettlementMutation.isPending;
+  const canSubmitSettlement = Boolean(closePeriodTargetId) && settlementFormValid && !createSettlementMutation.isPending;
+  const expectedCloseConfirmText = selectedPeriod ? `Close Period ${selectedPeriod.periodNo}` : "";
+  const canConfirmClosePeriod = Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
 
   const openSettlementModal = () => {
     setSettlementApiError(null);
@@ -221,34 +285,14 @@ export const MatchStakesPage = () => {
   const openClosePeriodModal = () => {
     setClosePeriodApiError(null);
     setClosePeriodNote("");
+    setClosePeriodConfirmText("");
     setClosePeriodOpen(true);
   };
 
-  const outstandingColumns: TableColumnsType<DebtPeriodPlayerSummaryDto> = [
-    { title: "Player", dataIndex: "playerName", key: "playerName", render: (value: string) => <span className="font-semibold text-slate-900">{value}</span> },
-    { title: "Matches", dataIndex: "totalMatches", key: "totalMatches", width: 120 },
-    { title: "Accrued", dataIndex: "accruedNetVnd", key: "accruedNetVnd", render: (value: number) => <span className={getOutstandingClassName(value)}>{formatVnd(value)}</span> },
-    { title: "Settled Paid", dataIndex: "settledPaidVnd", key: "settledPaidVnd", render: (value: number) => formatVnd(value) },
-    { title: "Settled Received", dataIndex: "settledReceivedVnd", key: "settledReceivedVnd", render: (value: number) => formatVnd(value) },
-    { title: "Outstanding", dataIndex: "outstandingNetVnd", key: "outstandingNetVnd", render: (value: number) => <span className={`text-base font-semibold ${getOutstandingClassName(value)}`}>{formatVnd(value)}</span> }
-  ];
-
-  if (currentPeriodQuery.isError) {
-    return (
-      <PageContainer>
-        <AppBreadcrumb items={[{ label: "Match Stakes" }]} />
-        <PageHeader
-          title="Match Stakes"
-          subtitle="Track debt periods, cumulative balances, settlements, and match history."
-          actions={<Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>Create match</Button>}
-        />
-        <ErrorState description={getErrorMessage(toAppError(currentPeriodQuery.error))} onRetry={() => void currentPeriodQuery.refetch()} />
-      </PageContainer>
-    );
-  }
-
-  const matchesMeta = matchesQuery.data?.meta;
-  const periodsMeta = periodsQuery.data?.meta;
+  const periodSelectOptions = allPeriods.map((period) => ({
+    value: period.id,
+    label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
+  }));
 
   return (
     <PageContainer>
@@ -256,304 +300,271 @@ export const MatchStakesPage = () => {
 
       <PageHeader
         title="Match Stakes"
-        subtitle="Debt-period tracking with cumulative outstanding balances and real settlement history."
+        subtitle="Simple debt notebook by period: current totals first, then match-by-match accumulation."
         actions={
           <>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
               Create match
             </Button>
-            {openPeriod ? <Button onClick={openSettlementModal}>Record settlement</Button> : null}
-            {openPeriod?.status === "OPEN" ? (
-              <Tooltip
-                title={
-                  hasOutstanding
-                    ? "Outstanding balances are not zero. Record settlements until fully settled before closing."
-                    : "Close this debt period"
-                }
-              >
+            {selectedPeriod?.status === "OPEN" ? (
+              <Tooltip title="Close this period (requires confirmation in modal).">
                 <span>
-                  <Button onClick={openClosePeriodModal} disabled={hasOutstanding}>
+                  <Button onClick={openClosePeriodModal}>
                     Close period
                   </Button>
                 </span>
               </Tooltip>
             ) : null}
-            {!openPeriod ? <Button onClick={openCreatePeriodModal}>New debt period</Button> : null}
+            {!hasOpenPeriod ? <Button onClick={openCreatePeriodModal}>New debt period</Button> : null}
           </>
         }
       />
 
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <SectionCard title="Current debt period" description="The currently active debt period for Match Stakes">
-          {currentPeriodQuery.isLoading ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <Tooltip title={showDebtPeriodDetail ? "Hide Debt Period detail" : "Show Debt Period detail"}>
+          <Button
+            icon={showDebtPeriodDetail ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+            onClick={() => setShowDebtPeriodDetail((previous) => !previous)}
+          />
+        </Tooltip>
+        <Tooltip title="Filter Debt Period">
+          <Button icon={<FilterOutlined />} onClick={() => setPeriodFilterOpen(true)} />
+        </Tooltip>
+      </div>
+
+      {showDebtPeriodDetail ? (
+        <SectionCard title="Debt Period" description="Selected debt period metadata.">
+          {allPeriodsQuery.isLoading || currentPeriodQuery.isLoading ? (
             <Skeleton active paragraph={{ rows: 4 }} />
-          ) : !openPeriod ? (
+          ) : currentPeriodQuery.isError ? (
+            <ErrorState description={getErrorMessage(toAppError(currentPeriodQuery.error))} onRetry={() => void currentPeriodQuery.refetch()} />
+          ) : allPeriodsQuery.isError ? (
+            <ErrorState description={getErrorMessage(toAppError(allPeriodsQuery.error))} onRetry={() => void allPeriodsQuery.refetch()} />
+          ) : allPeriods.length === 0 ? (
             <EmptyState
-              title="No open debt period"
-              description="Create a new debt period to start tracking cumulative balances and settlements."
+              title="No debt periods yet"
+              description="Create a debt period to start tracking debt accumulation by match."
               actionLabel="New debt period"
               onAction={openCreatePeriodModal}
             />
           ) : (
             <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Tag color={openPeriod.status === "OPEN" ? "green" : "default"}>{getEnumLabel(debtPeriodStatusLabels, openPeriod.status)}</Tag>
-                <span className="text-sm font-semibold text-slate-900">{`Period #${openPeriod.periodNo}`}</span>
-              </div>
+              {!hasOpenPeriod ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="No open debt period right now. You can still review historical periods below."
+                  action={
+                    <Button size="small" onClick={openCreatePeriodModal}>
+                      New debt period
+                    </Button>
+                  }
+                />
+              ) : null}
 
-              <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Opened at</div>
-                  <div className="font-medium text-slate-900">{formatDateTime(openPeriod.openedAt)}</div>
+              {!selectedPeriodId ? (
+                <EmptyState title="Select a debt period" description="Use filter button to choose one period." />
+              ) : selectedPeriodTimelineQuery.isLoading ? (
+                <Skeleton active paragraph={{ rows: 4 }} />
+              ) : selectedPeriodTimelineQuery.isError ? (
+                <ErrorState
+                  description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
+                  onRetry={() => void selectedPeriodTimelineQuery.refetch()}
+                />
+              ) : selectedPeriod ? (
+                <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Period</div>
+                    <div className="mt-1 font-semibold text-slate-900">{`#${selectedPeriod.periodNo}`}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Opened</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedPeriod.openedAt)}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Total matches</div>
+                    <div className="mt-1 font-semibold text-slate-900">{selectedSummary?.totalMatches ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Status</div>
+                    <div className="mt-1">
+                      <Tag color={selectedPeriod.status === "OPEN" ? "green" : "default"}>
+                        {getEnumLabel(debtPeriodStatusLabels, selectedPeriod.status)}
+                      </Tag>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Closed</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedPeriod.closedAt)}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Closed at</div>
-                  <div className="font-medium text-slate-900">{formatDateTime(openPeriod.closedAt)}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Title</div>
-                  <div className="font-medium text-slate-900">{openPeriod.title || "-"}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500">Note</div>
-                  <div className="font-medium text-slate-900">{openPeriod.note || "-"}</div>
-                </div>
-              </div>
+              ) : (
+                <EmptyState title="Selected period not found" />
+              )}
             </div>
           )}
         </SectionCard>
+      ) : null}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <MetricCard label="Total Matches" value={currentSummary?.totalMatches ?? 0} />
-          <MetricCard label="Total Players" value={currentSummary?.totalPlayers ?? 0} />
-          <MetricCard
-            label="Outstanding To Receive"
-            value={formatVnd(currentSummary?.totalOutstandingReceiveVnd ?? 0)}
-            valueClassName="text-green-700"
-          />
-          <MetricCard
-            label="Outstanding To Pay"
-            value={formatVnd(currentSummary?.totalOutstandingPayVnd ?? 0)}
-            valueClassName="text-red-700"
-          />
-        </div>
-      </section>
-
-      <SectionCard title="Outstanding balances" description="Cumulative balance for the current debt period">
-        {currentPeriodQuery.isLoading ? (
-          <Skeleton active paragraph={{ rows: 5 }} />
-        ) : !openPeriod ? (
-          <EmptyState
-            title="No open period summary"
-            description="Open a new debt period to start tracking player outstanding balances."
-            actionLabel="New debt period"
-            onAction={openCreatePeriodModal}
+      <SectionCard
+        title="Current Debt"
+        description="Outstanding net debt per player for the selected period."
+        className="border-amber-400 shadow-xl shadow-amber-200/80 overflow-hidden"
+        bodyClassName="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50"
+      >
+        {!selectedPeriodId ? (
+          <EmptyState title="Select a debt period" />
+        ) : selectedPeriodTimelineQuery.isLoading ? (
+          <Skeleton active paragraph={{ rows: 6 }} />
+        ) : selectedPeriodTimelineQuery.isError ? (
+          <ErrorState
+            description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
+            onRetry={() => void selectedPeriodTimelineQuery.refetch()}
           />
         ) : sortedPlayers.length === 0 ? (
-          <EmptyState title="No players in this period yet" description="Create matches in this period to build outstanding balances." />
-        ) : isMobile ? (
-          <div className="space-y-3">
+          <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
+        ) : (
+          <div className="space-y-2.5">
             {sortedPlayers.map((player) => (
-              <div key={player.playerId} className="rounded-xl border border-slate-200 bg-slate-50/90 p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold text-slate-900">{player.playerName}</div>
-                  <div className={`text-base font-semibold ${getOutstandingClassName(player.outstandingNetVnd)}`}>
-                    {formatVnd(player.outstandingNetVnd)}
-                  </div>
+              <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.outstandingNetVnd)}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-base font-semibold text-slate-900">{player.playerName}</div>
+                  <div className={`text-xl font-bold ${getOutstandingClassName(player.outstandingNetVnd)}`}>{formatSignedVnd(player.outstandingNetVnd)}</div>
                 </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
-                  <div>
-                    <div className="text-slate-500">Matches</div>
-                    <div className="font-medium text-slate-900">{player.totalMatches}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-500">Accrued</div>
-                    <div className={getOutstandingClassName(player.accruedNetVnd)}>{formatVnd(player.accruedNetVnd)}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-500">Settled Paid</div>
-                    <div>{formatVnd(player.settledPaidVnd)}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-500">Settled Received</div>
-                    <div>{formatVnd(player.settledReceivedVnd)}</div>
-                  </div>
-                </div>
+                <div className="mt-1 text-xs text-slate-500">{`Accrued ${formatVnd(player.accruedNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
               </div>
             ))}
           </div>
-        ) : (
-          <Table rowKey="playerId" columns={outstandingColumns} dataSource={sortedPlayers} pagination={false} size="small" scroll={{ x: 900 }} />
         )}
       </SectionCard>
 
-      <SectionCard title="History" description="Matches, settlements, and debt period history">
-        <Tabs
-          items={[
-            {
-              key: "matches",
-              label: "Matches",
-              children: !openPeriod ? (
-                <EmptyState
-                  title="No open debt period"
-                  description="Create or open a debt period to view match history scoped to that period."
-                  actionLabel="New debt period"
-                  onAction={openCreatePeriodModal}
-                />
-              ) : matchesQuery.isLoading ? (
-                <Skeleton active paragraph={{ rows: 4 }} />
-              ) : matchesQuery.isError ? (
-                <ErrorState description={getErrorMessage(toAppError(matchesQuery.error))} onRetry={() => void matchesQuery.refetch()} />
-              ) : (matchesQuery.data?.data ?? []).length === 0 ? (
-                <EmptyState title="No matches in this period yet" description="Create a match to begin period history." />
-              ) : (
-                <div className="space-y-3">
-                  {(matchesQuery.data?.data ?? []).map((item) => renderMatchCard(item, setSelectedMatchId))}
-                  <div className="flex justify-center pt-1">
-                    <Pagination
-                      current={matchesMeta?.page ?? matchesPage}
-                      pageSize={matchesMeta?.pageSize ?? 12}
-                      total={matchesMeta?.total ?? 0}
-                      showSizeChanger={false}
-                      onChange={setMatchesPage}
-                    />
+      <SectionCard
+        title="History"
+        description="Debt accumulation by match."
+        actions={
+          <Tooltip title={historyViewMode === "minimal" ? "Switch to Detail View" : "Switch to Minimal View"}>
+            <Button
+              size="middle"
+              shape="default"
+              icon={historyViewMode === "minimal" ? <UnorderedListOutlined/> : <AppstoreOutlined />}
+              onClick={() => setHistoryViewMode((prev) => (prev === "minimal" ? "detail" : "minimal"))}
+            />
+          </Tooltip>
+        }
+      >
+        {!selectedPeriodId ? (
+          <EmptyState title="Select a debt period" />
+        ) : selectedPeriodTimelineQuery.isLoading ? (
+          <Skeleton active paragraph={{ rows: 6 }} />
+        ) : selectedPeriodTimelineQuery.isError ? (
+          <ErrorState
+            description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
+            onRetry={() => void selectedPeriodTimelineQuery.refetch()}
+          />
+        ) : (
+          <div className="space-y-2.5">
+            <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
+              {(selectedTimeline?.history ?? []).map((historyItem) => (
+                <button
+                  key={historyItem.matchId}
+                  className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
+                  onClick={() => setSelectedMatchId(historyItem.matchId)}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Tag className="!text-[11px]" color="blue">
+                      {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
+                    </Tag>
+                    <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
                   </div>
-                </div>
-              )
-            },
-            {
-              key: "settlements",
-              label: "Settlements",
-              children: !openPeriod ? (
-                <EmptyState
-                  title="No open debt period"
-                  description="Create a debt period before recording settlement payments."
-                  actionLabel="New debt period"
-                  onAction={openCreatePeriodModal}
-                />
-              ) : currentPeriodDetailQuery.isLoading ? (
-                <Skeleton active paragraph={{ rows: 4 }} />
-              ) : currentPeriodDetailQuery.isError ? (
-                <ErrorState
-                  description={getErrorMessage(toAppError(currentPeriodDetailQuery.error))}
-                  onRetry={() => void currentPeriodDetailQuery.refetch()}
-                />
-              ) : (currentPeriodDetailQuery.data?.settlements ?? []).length === 0 ? (
-                <EmptyState
-                  title="No settlements recorded"
-                  description="Use Record settlement to log real-world payments in this debt period."
-                  actionLabel="Record settlement"
-                  onAction={openSettlementModal}
-                />
-              ) : (
-                <div className="space-y-3">
-                  {(currentPeriodDetailQuery.data?.settlements ?? []).map((settlement) => (
-                    <div key={settlement.id} className="rounded-xl border border-slate-200/90 bg-white p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-slate-900">{formatDateTime(settlement.postedAt)}</div>
-                        <Tag>{`${settlement.lines.length} lines`}</Tag>
-                      </div>
-                      {settlement.note ? <div className="mt-1 text-xs text-slate-500">{settlement.note}</div> : null}
-                      <div className="mt-3 space-y-2">
-                        {settlement.lines.map((line) => (
-                          <div key={line.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                              <span className="font-medium text-slate-900">{`${line.payerPlayerName} -> ${line.receiverPlayerName}`}</span>
-                              <span className="font-semibold text-slate-900">{formatVnd(line.amountVnd)}</span>
+
+                  <div className="mt-2 space-y-1.5">
+                    {sortTimelineRows(historyItem.players).map((row) => (
+                      <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
+                          <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
+                        </div>
+
+                        {historyViewMode === "detail" ? (
+                          <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                            <div className={`font-medium ${getPlacementToneClassName(row)}`}>
+                              {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
                             </div>
-                            {line.note ? <div className="mt-1 text-xs text-slate-500">{line.note}</div> : null}
+                            <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
                           </div>
-                        ))}
+                        ) : null}
                       </div>
+                    ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {(selectedTimeline?.history ?? []).length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-600">No matches in this period yet.</div>
+            ) : null}
+
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
+              <div className="text-sm font-semibold text-slate-900">Initial debt</div>
+              {(initialPlayers ?? []).length === 0 ? (
+                <div className="mt-2 text-sm text-slate-500">No players yet.</div>
+              ) : (
+                <div className="mt-2 space-y-1">
+                  {initialPlayers.map((player) => (
+                    <div key={player.playerId} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-600">{player.playerName}</span>
+                      <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
                     </div>
                   ))}
                 </div>
-              )
-            },
-            {
-              key: "periods",
-              label: "Period History",
-              children: periodsQuery.isLoading ? (
-                <Skeleton active paragraph={{ rows: 5 }} />
-              ) : periodsQuery.isError ? (
-                <ErrorState description={getErrorMessage(toAppError(periodsQuery.error))} onRetry={() => void periodsQuery.refetch()} />
-              ) : (periodsQuery.data?.data ?? []).length === 0 ? (
-                <EmptyState
-                  title="No debt periods yet"
-                  description="Create the first debt period to start tracking outstanding balances."
-                  actionLabel="New debt period"
-                  onAction={openCreatePeriodModal}
-                />
-              ) : (
-                <div className="space-y-3">
-                  <List
-                    dataSource={periodsQuery.data?.data ?? []}
-                    renderItem={(period) => (
-                      <List.Item className="!px-0">
-                        <button
-                          className="focus-ring w-full rounded-xl border border-slate-200/90 bg-white p-3 text-left transition hover:border-brand-500"
-                          onClick={() => {
-                            setSelectedPeriodId(period.id);
-                            setPeriodDrawerOpen(true);
-                          }}
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-slate-900">{`Period #${period.periodNo}`}</div>
-                            <div className="flex items-center gap-2">
-                              <Tag color={period.status === "OPEN" ? "green" : "default"}>{getEnumLabel(debtPeriodStatusLabels, period.status)}</Tag>
-                              {openPeriodId === period.id ? <Tag color="blue">Current</Tag> : null}
-                            </div>
-                          </div>
-
-                          <div className="mt-1 text-xs text-slate-500">
-                            {`Opened: ${formatDateTime(period.openedAt)} | Closed: ${formatDateTime(period.closedAt)}`}
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4">
-                            <div>{`Matches: ${period.totalMatches}`}</div>
-                            <div>{`Players: ${period.totalPlayers}`}</div>
-                            <div className="text-green-700">{`Receive: ${formatVnd(period.totalOutstandingReceiveVnd)}`}</div>
-                            <div className="text-red-700">{`Pay: ${formatVnd(period.totalOutstandingPayVnd)}`}</div>
-                          </div>
-                        </button>
-                      </List.Item>
-                    )}
-                  />
-                  <div className="flex justify-center pt-1">
-                    <Pagination
-                      current={periodsMeta?.page ?? periodsPage}
-                      pageSize={periodsMeta?.pageSize ?? 12}
-                      total={periodsMeta?.total ?? 0}
-                      showSizeChanger={false}
-                      onChange={setPeriodsPage}
-                    />
-                  </div>
-                </div>
-              )
-            }
-          ]}
-        />
+              )}
+            </div>
+          </div>
+        )}
       </SectionCard>
-
-      <Button
-        type="primary"
-        shape="circle"
-        size="large"
-        icon={<PlusOutlined />}
-        className="fixed bottom-6 right-6 z-20 h-14 w-14 shadow-lg md:hidden"
-        aria-label="Create match stakes match"
-        onClick={() => navigate("/match-stakes/new")}
-      />
 
       <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
 
+      <Modal title="Filter Debt Period" open={periodFilterOpen} footer={null} onCancel={() => setPeriodFilterOpen(false)}>
+        <div className="space-y-3">
+          {allPeriodsQuery.isLoading ? (
+            <Skeleton active paragraph={{ rows: 3 }} />
+          ) : allPeriods.length === 0 ? (
+            <EmptyState title="No debt periods yet" description="Create a debt period first." />
+          ) : (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Period</label>
+                <Select
+                  value={selectedPeriodId}
+                  options={periodSelectOptions}
+                  onChange={(value) => {
+                    setSelectedPeriodId(value);
+                    setPeriodFilterOpen(false);
+                  }}
+                  placeholder="Select debt period"
+                  className="w-full"
+                />
+              </div>
+              {selectedPeriod ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600">
+                  <div>{`Period #${selectedPeriod.periodNo}`}</div>
+                  <div>{`Opened: ${formatDateTime(selectedPeriod.openedAt)}`}</div>
+                  <div>{`Matches: ${selectedSummary?.totalMatches ?? 0}`}</div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </Modal>
+
       <Modal
-        title={openPeriod ? `Record settlement - Period #${openPeriod.periodNo}` : "Record settlement"}
+        title={selectedPeriod ? `Record settlement - Period #${selectedPeriod.periodNo}` : "Record settlement"}
         open={settlementOpen}
         okText="Record settlement"
         okButtonProps={{ loading: createSettlementMutation.isPending, disabled: !canSubmitSettlement }}
         onOk={async () => {
-          if (!openPeriodId || !canSubmitSettlement) {
+          if (!closePeriodTargetId || !canSubmitSettlement) {
             return;
           }
 
@@ -568,7 +579,7 @@ export const MatchStakesPage = () => {
 
           try {
             await createSettlementMutation.mutateAsync({
-              periodId: openPeriodId,
+              periodId: closePeriodTargetId,
               payload: {
                 postedAt: settlementPostedAt ? settlementPostedAt.toISOString() : undefined,
                 note: settlementNote.trim() || null,
@@ -764,15 +775,15 @@ export const MatchStakesPage = () => {
       </Modal>
 
       <Modal
-        title={openPeriod ? `Close Period #${openPeriod.periodNo}` : "Close period"}
+        title={selectedPeriod ? `Close Period #${selectedPeriod.periodNo}` : "Close period"}
         open={closePeriodOpen}
         okText="Close period"
         okButtonProps={{
           loading: closePeriodMutation.isPending,
-          disabled: !openPeriodId || hasOutstanding
+          disabled: !closePeriodTargetId || !canConfirmClosePeriod
         }}
         onOk={async () => {
-          if (!openPeriodId || hasOutstanding) {
+          if (!closePeriodTargetId || !canConfirmClosePeriod) {
             return;
           }
 
@@ -780,7 +791,7 @@ export const MatchStakesPage = () => {
 
           try {
             await closePeriodMutation.mutateAsync({
-              periodId: openPeriodId,
+              periodId: closePeriodTargetId,
               payload: {
                 note: closePeriodNote.trim() || null
               }
@@ -788,7 +799,13 @@ export const MatchStakesPage = () => {
             message.success("Debt period closed.");
             setClosePeriodOpen(false);
           } catch (error) {
-            setClosePeriodApiError(getErrorMessage(toAppError(error)));
+            const appError = toAppError(error);
+            if (appError.code === "DEBT_PERIOD_OUTSTANDING_NOT_ZERO") {
+              setClosePeriodApiError("Cannot close this period because outstanding balances are not zero.");
+              return;
+            }
+
+            setClosePeriodApiError(getErrorMessage(appError));
           }
         }}
         onCancel={() => setClosePeriodOpen(false)}
@@ -797,15 +814,18 @@ export const MatchStakesPage = () => {
           <FormApiError message={closePeriodApiError} />
 
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <div>{`Outstanding to receive: ${formatVnd(currentSummary?.totalOutstandingReceiveVnd ?? 0)}`}</div>
-            <div>{`Outstanding to pay: ${formatVnd(currentSummary?.totalOutstandingPayVnd ?? 0)}`}</div>
+            <div>{`Outstanding to receive: ${formatVnd(selectedSummary?.totalOutstandingReceiveVnd ?? 0)}`}</div>
+            <div>{`Outstanding to pay: ${formatVnd(selectedSummary?.totalOutstandingPayVnd ?? 0)}`}</div>
           </div>
 
-          {hasOutstanding ? (
-            <Alert type="warning" showIcon message="Outstanding balances are not zero. Record settlements before closing this period." />
-          ) : (
-            <Alert type="success" showIcon message="All balances are settled. This period can be closed." />
-          )}
+          {hasOutstanding ? <Alert type="warning" showIcon message="Outstanding may still be non-zero. Backend can reject close request." /> : null}
+          {!hasOutstanding ? <Alert type="success" showIcon message="All balances are settled. This period can be closed." /> : null}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Confirmation</label>
+            <div className="mb-1 text-xs text-slate-500">{`Type exactly: ${expectedCloseConfirmText}`}</div>
+            <Input value={closePeriodConfirmText} onChange={(event) => setClosePeriodConfirmText(event.target.value)} />
+          </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium">Close note (optional)</label>
@@ -813,86 +833,6 @@ export const MatchStakesPage = () => {
           </div>
         </div>
       </Modal>
-
-      <Drawer
-        title={selectedPeriodId ? "Debt period detail" : "Period detail"}
-        open={periodDrawerOpen}
-        onClose={() => setPeriodDrawerOpen(false)}
-        width={isMobile ? "100%" : 640}
-      >
-        {selectedPeriodDetailQuery.isLoading ? (
-          <Skeleton active paragraph={{ rows: 6 }} />
-        ) : selectedPeriodDetailQuery.isError ? (
-          <ErrorState
-            description={getErrorMessage(toAppError(selectedPeriodDetailQuery.error))}
-            onRetry={() => void selectedPeriodDetailQuery.refetch()}
-          />
-        ) : selectedPeriodDetailQuery.data ? (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-slate-900">{`Period #${selectedPeriodDetailQuery.data.period.periodNo}`}</div>
-                <Tag color={selectedPeriodDetailQuery.data.period.status === "OPEN" ? "green" : "default"}>
-                  {getEnumLabel(debtPeriodStatusLabels, selectedPeriodDetailQuery.data.period.status)}
-                </Tag>
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                {`Opened: ${formatDateTime(selectedPeriodDetailQuery.data.period.openedAt)} | Closed: ${formatDateTime(
-                  selectedPeriodDetailQuery.data.period.closedAt
-                )}`}
-              </div>
-              <div className="mt-2 text-xs text-slate-500">{selectedPeriodDetailQuery.data.period.title || "No title"}</div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-lg border border-slate-200 p-2">{`Matches: ${selectedPeriodDetailQuery.data.summary.totalMatches}`}</div>
-              <div className="rounded-lg border border-slate-200 p-2">{`Players: ${selectedPeriodDetailQuery.data.summary.totalPlayers}`}</div>
-              <div className="rounded-lg border border-slate-200 p-2 text-green-700">
-                {`Receive: ${formatVnd(selectedPeriodDetailQuery.data.summary.totalOutstandingReceiveVnd)}`}
-              </div>
-              <div className="rounded-lg border border-slate-200 p-2 text-red-700">
-                {`Pay: ${formatVnd(selectedPeriodDetailQuery.data.summary.totalOutstandingPayVnd)}`}
-              </div>
-            </div>
-
-            <SectionCard title="Players" className="!rounded-xl" bodyClassName="!px-3 !py-3">
-              {(selectedPeriodDetailQuery.data.players ?? []).length === 0 ? (
-                <div className="text-sm text-slate-500">No player summary data.</div>
-              ) : (
-                <div className="space-y-2">
-                  {sortOutstandingPlayers(selectedPeriodDetailQuery.data.players).map((player) => (
-                    <div key={player.playerId} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-900">{player.playerName}</span>
-                        <span className={`text-sm font-semibold ${getOutstandingClassName(player.outstandingNetVnd)}`}>
-                          {formatVnd(player.outstandingNetVnd)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-
-            <SectionCard title="Settlements" className="!rounded-xl" bodyClassName="!px-3 !py-3">
-              {(selectedPeriodDetailQuery.data.settlements ?? []).length === 0 ? (
-                <div className="text-sm text-slate-500">No settlements recorded in this period.</div>
-              ) : (
-                <div className="space-y-2">
-                  {(selectedPeriodDetailQuery.data.settlements ?? []).map((settlement) => (
-                    <div key={settlement.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                      <div className="text-xs text-slate-500">{formatDateTime(settlement.postedAt)}</div>
-                      <div className="mt-1 text-xs text-slate-700">{`${settlement.lines.length} settlement lines`}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-          </div>
-        ) : (
-          <EmptyState title="Select a period" />
-        )}
-      </Drawer>
     </PageContainer>
   );
 };
