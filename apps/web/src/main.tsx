@@ -1,12 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
-import { App as AntdApp } from "antd";
+import { App as AntdApp, ConfigProvider, message } from "antd";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/api/queryClient";
 import { router } from "@/router/router";
 import "@/app/styles.css";
-import { ConfigProvider } from "antd";
+
+message.config({
+  top: 20,
+  maxCount: 3
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

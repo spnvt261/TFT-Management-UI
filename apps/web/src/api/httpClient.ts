@@ -1,6 +1,8 @@
 import axios from "axios";
 import type { AxiosError, AxiosRequestConfig } from "axios";
+import { message } from "antd";
 import { env } from "@/lib/env";
+import { getErrorMessage } from "@/lib/error-messages";
 import type { ApiErrorResponse, ApiSuccessResponse, PaginatedResult } from "@/types/api";
 import type { AppError } from "@/types/error";
 
@@ -43,6 +45,49 @@ export const toAppError = (error: unknown): AppError => {
     message: error instanceof Error ? error.message : "Unknown error"
   };
 };
+
+const API_ERROR_NOTIFY_COOLDOWN_MS = 1_500;
+let lastApiErrorSignature = "";
+let lastApiErrorTimestamp = 0;
+
+const shouldNotifyApiError = (signature: string) => {
+  const now = Date.now();
+  const isDuplicate = signature === lastApiErrorSignature && now - lastApiErrorTimestamp < API_ERROR_NOTIFY_COOLDOWN_MS;
+
+  if (isDuplicate) {
+    return false;
+  }
+
+  lastApiErrorSignature = signature;
+  lastApiErrorTimestamp = now;
+  return true;
+};
+
+const notifyApiError = (error: unknown) => {
+  const appError = toAppError(error);
+  const signature = `${appError.status}|${appError.code}|${appError.message}`;
+
+  if (!shouldNotifyApiError(signature)) {
+    return;
+  }
+
+  message.error({
+    content: getErrorMessage(appError),
+    key: "api-error",
+    duration: 4
+  });
+};
+
+httpClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (!axios.isCancel(error)) {
+      notifyApiError(error);
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promise<PaginatedResult<T>> {
   const response = await httpClient.get<ApiSuccessResponse<T>>(url, config);

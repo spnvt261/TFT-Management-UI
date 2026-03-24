@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/cn";
 
 export interface AppBreadcrumbItem {
@@ -12,7 +12,10 @@ interface AppBreadcrumbProps {
 }
 
 export const AppBreadcrumb = ({ items, className }: AppBreadcrumbProps) => {
-  if (!items.length) {
+  const { pathname } = useLocation();
+  const pageLevel = pathname.split("/").filter(Boolean).length;
+
+  if (!items.length || pageLevel < 2) {
     return null;
   }
 
