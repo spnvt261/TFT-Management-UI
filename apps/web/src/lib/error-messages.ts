@@ -15,7 +15,13 @@ export const knownErrorMessages: Record<string, string> = {
   RULE_BUILDER_PAYOUT_LOSS_UNBALANCED: "Total payouts and losses must be balanced.",
   RULE_BUILDER_PARTICIPANT_COUNT_UNSUPPORTED: "Only participant count 3 or 4 is supported in builder mode.",
   RULE_BUILDER_DUPLICATE_RANK: "Duplicate payout/loss rank found.",
-  RULE_BUILDER_RANK_COVERAGE_INVALID: "Payout/loss rank coverage is invalid."
+  RULE_BUILDER_RANK_COVERAGE_INVALID: "Payout/loss rank coverage is invalid.",
+  DEBT_PERIOD_NOT_FOUND: "Debt period was not found.",
+  DEBT_PERIOD_OPEN_ALREADY_EXISTS: "An open debt period already exists.",
+  DEBT_PERIOD_NOT_OPEN: "This debt period is already closed.",
+  DEBT_PERIOD_OUTSTANDING_NOT_ZERO: "Cannot close this period because outstanding balances are not zero.",
+  DEBT_SETTLEMENT_INVALID: "Settlement data is invalid. Please check payer, receiver, and amount values.",
+  DEBT_SETTLEMENT_OVERPAY: "Settlement amount is too high and would overpay outstanding balances."
 };
 
 const stringifyDetails = (details: unknown): string => {

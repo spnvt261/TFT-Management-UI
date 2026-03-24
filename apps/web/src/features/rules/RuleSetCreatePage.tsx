@@ -38,7 +38,7 @@ export const RuleSetCreatePage = () => {
         <PageHeader
           title="Create Match Stakes Rule"
           subtitle="Configure a payout rule for 3 or 4 participants, including winners, losses, and special penalties."
-          actions={cancelAction}
+          // actions={cancelAction}
         />
 
         <MatchStakesRuleCreateFlow />
@@ -53,7 +53,7 @@ export const RuleSetCreatePage = () => {
         <PageHeader
           title={`Create ${moduleLabels.GROUP_FUND} Rule`}
           subtitle="Configure contribution obligations and fund movements by participant rank."
-          actions={cancelAction}
+          // actions={cancelAction}
         />
 
         <GroupFundRuleCreateFlow />

@@ -7,7 +7,8 @@ export const invalidateAfterMatchCreate = async (queryClient: QueryClient, modul
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "summary"] }),
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "ledger"] }),
-      queryClient.invalidateQueries({ queryKey: ["match-stakes", "matches"] })
+      queryClient.invalidateQueries({ queryKey: ["match-stakes", "matches"] }),
+      queryClient.invalidateQueries({ queryKey: ["match-stakes", "debt-periods"] })
     ]);
   }
 

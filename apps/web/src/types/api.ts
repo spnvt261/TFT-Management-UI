@@ -32,6 +32,7 @@ export interface PaginatedResult<T> {
 
 export type ModuleType = "MATCH_STAKES" | "GROUP_FUND";
 export type MatchStatus = "DRAFT" | "CALCULATED" | "POSTED" | "VOIDED";
+export type DebtPeriodStatus = "OPEN" | "CLOSED";
 export type RuleStatus = "ACTIVE" | "INACTIVE";
 export type RuleKind =
   | "BASE_RELATIVE_RANK"
@@ -450,6 +451,11 @@ export interface MatchListItemDto {
   ruleSetVersionNo: number;
   notePreview: string | null;
   status: string;
+  debtPeriodId?: string | null;
+  debtPeriodNo?: number | null;
+  confirmationMode?: "ENGINE" | "MANUAL_ADJUSTED";
+  overrideReason?: string | null;
+  manualAdjusted?: boolean;
   participants: MatchParticipantDto[];
   totalTransferVnd: number;
   totalFundInVnd: number;
@@ -464,6 +470,11 @@ export interface MatchDetailDto {
   participantCount: number;
   status: string;
   note: string | null;
+  debtPeriodId?: string | null;
+  debtPeriodNo?: number | null;
+  confirmationMode?: "ENGINE" | "MANUAL_ADJUSTED";
+  overrideReason?: string | null;
+  manualAdjusted?: boolean;
   ruleSet: { id: string; name: string; module: ModuleType };
   ruleSetVersion: {
     id: string;
@@ -519,6 +530,125 @@ export interface ModuleLedgerQuery {
   to?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface MatchStakesMatchesQuery extends ModuleLedgerQuery {
+  ruleSetId?: string;
+  periodId?: string;
+}
+
+export interface ListDebtPeriodsQuery {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface DebtPeriodDto {
+  id: string;
+  periodNo: number;
+  title: string | null;
+  note: string | null;
+  status: DebtPeriodStatus;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+export interface DebtPeriodPlayerSummaryDto {
+  playerId: string;
+  playerName: string;
+  totalMatches: number;
+  accruedNetVnd: number;
+  settledPaidVnd: number;
+  settledReceivedVnd: number;
+  outstandingNetVnd: number;
+}
+
+export interface DebtPeriodSummaryDto {
+  totalMatches: number;
+  totalPlayers: number;
+  totalOutstandingReceiveVnd: number;
+  totalOutstandingPayVnd: number;
+}
+
+export interface DebtPeriodCurrentDto {
+  period: DebtPeriodDto;
+  summary: DebtPeriodSummaryDto;
+  players: DebtPeriodPlayerSummaryDto[];
+}
+
+export interface DebtSettlementLineDto {
+  id: string;
+  payerPlayerId: string;
+  payerPlayerName: string;
+  receiverPlayerId: string;
+  receiverPlayerName: string;
+  amountVnd: number;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface DebtSettlementDto {
+  id: string;
+  postedAt: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: DebtSettlementLineDto[];
+}
+
+export interface DebtPeriodDetailDto {
+  period: DebtPeriodDto;
+  summary: DebtPeriodSummaryDto;
+  players: DebtPeriodPlayerSummaryDto[];
+  settlements: DebtSettlementDto[];
+  recentMatches: Array<{
+    id: string;
+    playedAt: string;
+    participantCount: number;
+    status: string;
+    debtPeriodId: string | null;
+    debtPeriodNo: number | null;
+  }>;
+}
+
+export interface DebtPeriodListItemDto extends DebtPeriodDto {
+  totalMatches: number;
+  totalPlayers: number;
+  totalOutstandingReceiveVnd: number;
+  totalOutstandingPayVnd: number;
+}
+
+export interface CreateDebtPeriodRequest {
+  title?: string | null;
+  note?: string | null;
+}
+
+export interface CreateDebtSettlementLineRequest {
+  payerPlayerId: string;
+  receiverPlayerId: string;
+  amountVnd: number;
+  note?: string | null;
+}
+
+export interface CreateDebtSettlementRequest {
+  postedAt?: string;
+  note?: string | null;
+  lines: CreateDebtSettlementLineRequest[];
+}
+
+export interface CreateDebtSettlementResultDto {
+  settlement: DebtSettlementDto;
+  summary: DebtPeriodSummaryDto;
+  players: DebtPeriodPlayerSummaryDto[];
+}
+
+export interface CloseDebtPeriodRequest {
+  note?: string | null;
+}
+
+export interface CloseDebtPeriodResultDto {
+  id: string;
+  status: "CLOSED";
+  closedAt: string | null;
 }
 
 export interface MatchStakesSummaryDto {

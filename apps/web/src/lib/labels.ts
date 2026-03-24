@@ -1,4 +1,4 @@
-import type { ModuleType, MatchStatus, RuleStatus, RuleKind, GroupFundTransactionType } from "@/types/api";
+import type { DebtPeriodStatus, GroupFundTransactionType, MatchStatus, ModuleType, RuleKind, RuleStatus } from "@/types/api";
 
 export const moduleLabels: Record<ModuleType, string> = {
   MATCH_STAKES: "Match Stakes",
@@ -30,6 +30,11 @@ export const groupFundTransactionLabels: Record<GroupFundTransactionType, string
   WITHDRAWAL: "Withdrawal",
   ADJUSTMENT_IN: "Adjustment In",
   ADJUSTMENT_OUT: "Adjustment Out"
+};
+
+export const debtPeriodStatusLabels: Record<DebtPeriodStatus, string> = {
+  OPEN: "Open",
+  CLOSED: "Closed"
 };
 
 export const getEnumLabel = (map: Record<string, string>, value: string) => map[value] ?? value;
