@@ -50,6 +50,10 @@ type SharedDropdownProps<T extends string | number> = {
 };
 
 const STORAGE_KEY = "tft2.match-stakes.create.draft.v2";
+const MATCH_STAKES_CREATE_RETURN_QUERY = new URLSearchParams({
+  returnTo: "/match-stakes/new",
+  returnLabel: "Create Match"
+}).toString();
 const PARTICIPANT_COUNT_OPTIONS = [
   { label: "3 players", value: 3 },
   { label: "4 players", value: 4 }
@@ -238,10 +242,10 @@ export const MatchStakesCreatePage = () => {
 
   const createMutation = useMutation({
     mutationFn: matchesApi.create,
-    onSuccess: async (result) => {
+    onSuccess: async () => {
       await invalidateAfterMatchCreate(queryClient, "MATCH_STAKES");
       message.success("Match created successfully.");
-      navigate(`/matches/${result.id}`);
+      navigate("/match-stakes", { replace: true });
     },
     onError: (error) => {
       setFormError(getErrorMessage(toAppError(error)));
@@ -651,7 +655,10 @@ export const MatchStakesCreatePage = () => {
                       {selectedRuleOption.description || "No description"}
                     </div>
                   </div>
-                  <Link to={`/rules/${selectedRuleOption.value}`} className="shrink-0 text-xs font-medium text-brand-700 hover:text-brand-800">
+                  <Link
+                    to={`/rules/${selectedRuleOption.value}?${MATCH_STAKES_CREATE_RETURN_QUERY}`}
+                    className="shrink-0 text-xs font-medium text-brand-700 hover:text-brand-800"
+                  >
                     View detail
                   </Link>
                 </div>

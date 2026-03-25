@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AppstoreOutlined,
   DeleteOutlined,
@@ -25,13 +25,20 @@ import {
   useCreateDebtPeriod,
   useCreateDebtSettlement,
   useCurrentDebtPeriod,
-  useDebtPeriodTimeline
+  useDebtPeriodTimeline,
+  useInfiniteDebtPeriodHistory
 } from "@/features/match-stakes/hooks";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { debtPeriodStatusLabels, getEnumLabel } from "@/lib/labels";
-import type { CreateDebtSettlementLineRequest, DebtPeriodPlayerSummaryDto, DebtPeriodTimelinePlayerRowDto } from "@/types/api";
+import type {
+  CreateDebtSettlementLineRequest,
+  DebtPeriodPlayerSummaryDto,
+  DebtPeriodTimelineDto,
+  DebtPeriodTimelineMatchDto,
+  DebtPeriodTimelinePlayerRowDto
+} from "@/types/api";
 
 type SettlementLineForm = {
   localId: number;
@@ -42,8 +49,10 @@ type SettlementLineForm = {
 };
 
 type HistoryViewMode = "minimal" | "detail";
+type CloseBalanceDraft = Record<string, number>;
 
 const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.match-stakes.history.view-mode";
+const ALL_PERIODS_FILTER_VALUE = "__ALL_PERIODS__";
 
 const createSettlementLine = (localId: number): SettlementLineForm => ({
   localId,
@@ -170,11 +179,29 @@ const getPlacementToneClassName = (row: DebtPeriodTimelinePlayerRowDto) => {
   return "text-slate-500";
 };
 
+const toMillis = (iso: string) => Date.parse(iso);
+
+const sortHistoryDesc = (history: DebtPeriodTimelineMatchDto[]) => {
+  const next = [...history];
+  next.sort((left, right) => {
+    const leftMatchNo = typeof left.matchNo === "number" ? left.matchNo : Number.MAX_SAFE_INTEGER;
+    const rightMatchNo = typeof right.matchNo === "number" ? right.matchNo : Number.MAX_SAFE_INTEGER;
+    if (leftMatchNo !== rightMatchNo && Number.isFinite(leftMatchNo) && Number.isFinite(rightMatchNo)) {
+      return rightMatchNo - leftMatchNo;
+    }
+
+    return toMillis(right.playedAt) - toMillis(left.playedAt);
+  });
+
+  return next;
+};
+
 export const MatchStakesPage = () => {
   const navigate = useNavigate();
 
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>();
+  const historyLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const [showDebtPeriodDetail, setShowDebtPeriodDetail] = useState(false);
   const [periodFilterOpen, setPeriodFilterOpen] = useState(false);
   const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(() => {
@@ -202,10 +229,12 @@ export const MatchStakesPage = () => {
   const [closePeriodApiError, setClosePeriodApiError] = useState<string | null>(null);
   const [closePeriodNote, setClosePeriodNote] = useState("");
   const [closePeriodConfirmText, setClosePeriodConfirmText] = useState("");
+  const [closeBalanceDraft, setCloseBalanceDraft] = useState<CloseBalanceDraft>({});
 
   const currentPeriodQuery = useCurrentDebtPeriod();
   const allPeriodsQuery = useAllDebtPeriods();
   const selectedPeriodTimelineQuery = useDebtPeriodTimeline(selectedPeriodId);
+  const allHistoryPeriodsQuery = useInfiniteDebtPeriodHistory(!selectedPeriodId);
 
   const createSettlementMutation = useCreateDebtSettlement();
   const closePeriodMutation = useCloseDebtPeriod();
@@ -215,25 +244,18 @@ export const MatchStakesPage = () => {
   const hasOpenPeriod = Boolean(openPeriodId);
 
   const allPeriods = allPeriodsQuery.data ?? [];
+  const activePeriodId = selectedPeriodId ?? openPeriodId ?? allPeriods[0]?.id;
+  const activePeriodTimelineQuery = useDebtPeriodTimeline(activePeriodId);
 
   useEffect(() => {
-    if (allPeriods.length === 0) {
-      setSelectedPeriodId(undefined);
-      return;
-    }
-
     setSelectedPeriodId((current) => {
       if (current && allPeriods.some((period) => period.id === current)) {
         return current;
       }
 
-      if (openPeriodId && allPeriods.some((period) => period.id === openPeriodId)) {
-        return openPeriodId;
-      }
-
-      return allPeriods[0].id;
+      return undefined;
     });
-  }, [allPeriods, openPeriodId]);
+  }, [allPeriods]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -241,13 +263,88 @@ export const MatchStakesPage = () => {
     }
   }, [historyViewMode]);
 
+  useEffect(() => {
+    if (selectedPeriodId || !allHistoryPeriodsQuery.hasNextPage || allHistoryPeriodsQuery.isFetchingNextPage) {
+      return;
+    }
+
+    const sentinel = historyLoadMoreRef.current;
+    if (!sentinel) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void allHistoryPeriodsQuery.fetchNextPage();
+        }
+      },
+      { rootMargin: "240px 0px" }
+    );
+
+    observer.observe(sentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    allHistoryPeriodsQuery.fetchNextPage,
+    allHistoryPeriodsQuery.hasNextPage,
+    allHistoryPeriodsQuery.isFetchingNextPage,
+    selectedPeriodId
+  ]);
+
   const selectedTimeline = selectedPeriodTimelineQuery.data;
-  const selectedPeriod = selectedTimeline?.period;
-  const selectedSummary = selectedTimeline?.summary;
-  const sortedPlayers = useMemo(() => sortOutstandingPlayers(selectedTimeline?.players ?? []), [selectedTimeline?.players]);
+  const activeTimeline = activePeriodTimelineQuery.data;
+  const activePeriod = activeTimeline?.period;
+  const activeSummary = activeTimeline?.summary;
+  const closePeriod = currentPeriodQuery.data?.period;
+  const closeSummary = currentPeriodQuery.data?.summary;
+
+  const selectedFilterPeriod =
+    selectedTimeline?.period ?? (selectedPeriodId ? allPeriods.find((period) => period.id === selectedPeriodId) : undefined);
+  const selectedFilterSummary = selectedTimeline?.summary;
+
+  const sortedPlayers = useMemo(() => sortOutstandingPlayers(activeTimeline?.players ?? []), [activeTimeline?.players]);
   const initialPlayers = useMemo(
-    () => sortTimelineRows(selectedTimeline?.initialRows ?? []),
-    [selectedTimeline?.initialRows]
+    () => sortTimelineRows(activeTimeline?.initialRows ?? []),
+    [activeTimeline?.initialRows]
+  );
+  const closeBalancePlayers = useMemo(
+    () => sortOutstandingPlayers(currentPeriodQuery.data?.players ?? []),
+    [currentPeriodQuery.data?.players]
+  );
+  const closeBalanceRows = useMemo(
+    () =>
+      closeBalancePlayers.map((player) => ({
+        ...player,
+        draftNetVnd: closeBalanceDraft[player.playerId] ?? 0
+      })),
+    [closeBalanceDraft, closeBalancePlayers]
+  );
+
+  useEffect(() => {
+    if (!closePeriodOpen) {
+      return;
+    }
+
+    setCloseBalanceDraft((previous) => {
+      const next: CloseBalanceDraft = {};
+      for (const player of closeBalancePlayers) {
+        next[player.playerId] = previous[player.playerId] ?? 0;
+      }
+
+      const changed =
+        Object.keys(next).length !== Object.keys(previous).length ||
+        Object.entries(next).some(([playerId, value]) => previous[playerId] !== value);
+
+      return changed ? next : previous;
+    });
+  }, [closeBalancePlayers, closePeriodOpen]);
+
+  const historyPeriodGroups = useMemo(
+    () => (allHistoryPeriodsQuery.data?.pages ?? []).flatMap((page) => page.periodTimelines),
+    [allHistoryPeriodsQuery.data]
   );
 
   const settlementPlayerOptions = sortedPlayers.map((player) => ({
@@ -255,16 +352,23 @@ export const MatchStakesPage = () => {
     value: player.playerId
   }));
 
-  const closePeriodTargetId = selectedPeriod?.status === "OPEN" ? selectedPeriod.id : undefined;
+  const closePeriodTargetId = closePeriod?.id;
   const hasOutstanding = hasAnyOutstandingBalance(
-    selectedSummary?.totalOutstandingReceiveVnd ?? 0,
-    selectedSummary?.totalOutstandingPayVnd ?? 0
+    closeSummary?.totalOutstandingReceiveVnd ?? 0,
+    closeSummary?.totalOutstandingPayVnd ?? 0
   );
 
   const settlementFormValid = settlementLines.length > 0 && settlementLines.every(isSettlementLineValid);
   const canSubmitSettlement = Boolean(closePeriodTargetId) && settlementFormValid && !createSettlementMutation.isPending;
-  const expectedCloseConfirmText = selectedPeriod ? `Close Period ${selectedPeriod.periodNo}` : "";
-  const canConfirmClosePeriod = Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
+  const canCloseWithMatch = (closeSummary?.totalMatches ?? 0) >= 1;
+  const canOpenClosePeriod = Boolean(closePeriodTargetId) && canCloseWithMatch;
+  const expectedCloseConfirmText = closePeriod ? `Close Period ${closePeriod.periodNo}` : "";
+  const canConfirmClosePeriod =
+    canCloseWithMatch && Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
+  const closingBalances = closeBalanceRows.map((player) => ({
+    playerId: player.playerId,
+    netVnd: Math.trunc(player.draftNetVnd)
+  }));
 
   const openSettlementModal = () => {
     setSettlementApiError(null);
@@ -286,13 +390,99 @@ export const MatchStakesPage = () => {
     setClosePeriodApiError(null);
     setClosePeriodNote("");
     setClosePeriodConfirmText("");
+    setCloseBalanceDraft(
+      Object.fromEntries(closeBalancePlayers.map((player) => [player.playerId, 0]))
+    );
     setClosePeriodOpen(true);
   };
 
-  const periodSelectOptions = allPeriods.map((period) => ({
-    value: period.id,
-    label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
-  }));
+  const periodSelectOptions = [
+    {
+      value: ALL_PERIODS_FILTER_VALUE,
+      label: "All periods - Full history"
+    },
+    ...allPeriods.map((period) => ({
+      value: period.id,
+      label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
+    }))
+  ];
+
+  const renderMobilePeriodSequence = (periodTimeline: DebtPeriodTimelineDto) => {
+    const mobileMatches = sortHistoryDesc(periodTimeline.history);
+
+    return (
+      <div key={periodTimeline.period.id} className="space-y-2 md:rounded-xl md:border md:border-slate-200 md:bg-slate-50/70 md:p-2.5">
+        {periodTimeline.period.closedAt ? (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Period End</div>
+            <div className="mt-0.5 text-xs font-semibold text-rose-900">{`End Period #${periodTimeline.period.periodNo}`}</div>
+          </div>
+        ) : null}
+
+        {mobileMatches.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">No matches in this period yet.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {mobileMatches.map((historyItem) => (
+              <button
+                key={historyItem.matchId}
+                className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500"
+                onClick={() => setSelectedMatchId(historyItem.matchId)}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Tag className="!text-[11px]" color="blue">
+                    {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
+                  </Tag>
+                  <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
+                </div>
+
+                <div className="mt-2 space-y-1.5">
+                  {sortTimelineRows(historyItem.players).map((row) => (
+                    <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
+                        <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
+                      </div>
+
+                      {historyViewMode === "detail" ? (
+                        <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <div className={`font-medium ${getPlacementToneClassName(row)}`}>
+                            {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
+                          </div>
+                          <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {periodTimeline.initialRows.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Init period: no players yet.</div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Init</div>
+            <div className="mt-1 space-y-1">
+              {sortTimelineRows(periodTimeline.initialRows).map((row) => (
+                <div key={`${periodTimeline.period.id}-init-${row.playerId}`} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-600">{row.playerName}</span>
+                  <span className="font-medium text-slate-600">{formatSignedVnd(row.cumulativeNetVnd)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Period Start</div>
+          <div className="mt-0.5 text-xs font-semibold text-emerald-900">{`Start Period #${periodTimeline.period.periodNo}`}</div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <PageContainer>
@@ -306,10 +496,10 @@ export const MatchStakesPage = () => {
             <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
               Create match
             </Button>
-            {selectedPeriod?.status === "OPEN" ? (
-              <Tooltip title="Close this period (requires confirmation in modal).">
+            {hasOpenPeriod ? (
+              <Tooltip title={canOpenClosePeriod ? "Close this period (requires confirmation in modal)." : "Need at least 1 match to close period."}>
                 <span>
-                  <Button onClick={openClosePeriodModal}>
+                  <Button onClick={openClosePeriodModal} disabled={!canOpenClosePeriod}>
                     Close period
                   </Button>
                 </span>
@@ -362,40 +552,40 @@ export const MatchStakesPage = () => {
                 />
               ) : null}
 
-              {!selectedPeriodId ? (
-                <EmptyState title="Select a debt period" description="Use filter button to choose one period." />
-              ) : selectedPeriodTimelineQuery.isLoading ? (
+              {!activePeriodId ? (
+                <EmptyState title="No debt periods yet" description="Create a debt period to start tracking debt accumulation by match." />
+              ) : activePeriodTimelineQuery.isLoading ? (
                 <Skeleton active paragraph={{ rows: 4 }} />
-              ) : selectedPeriodTimelineQuery.isError ? (
+              ) : activePeriodTimelineQuery.isError ? (
                 <ErrorState
-                  description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
-                  onRetry={() => void selectedPeriodTimelineQuery.refetch()}
+                  description={getErrorMessage(toAppError(activePeriodTimelineQuery.error))}
+                  onRetry={() => void activePeriodTimelineQuery.refetch()}
                 />
-              ) : selectedPeriod ? (
+              ) : activePeriod ? (
                 <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Period</div>
-                    <div className="mt-1 font-semibold text-slate-900">{`#${selectedPeriod.periodNo}`}</div>
+                    <div className="mt-1 font-semibold text-slate-900">{`#${activePeriod.periodNo}`}</div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Opened</div>
-                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedPeriod.openedAt)}</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(activePeriod.openedAt)}</div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Total matches</div>
-                    <div className="mt-1 font-semibold text-slate-900">{selectedSummary?.totalMatches ?? 0}</div>
+                    <div className="mt-1 font-semibold text-slate-900">{activeSummary?.totalMatches ?? 0}</div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Status</div>
                     <div className="mt-1">
-                      <Tag color={selectedPeriod.status === "OPEN" ? "green" : "default"}>
-                        {getEnumLabel(debtPeriodStatusLabels, selectedPeriod.status)}
+                      <Tag color={activePeriod.status === "OPEN" ? "green" : "default"}>
+                        {getEnumLabel(debtPeriodStatusLabels, activePeriod.status)}
                       </Tag>
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Closed</div>
-                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(selectedPeriod.closedAt)}</div>
+                    <div className="mt-1 font-semibold text-slate-900">{formatDateTime(activePeriod.closedAt)}</div>
                   </div>
                 </div>
               ) : (
@@ -408,18 +598,18 @@ export const MatchStakesPage = () => {
 
       <SectionCard
         title="Current Debt"
-        description="Outstanding net debt per player for the selected period."
+        description="Outstanding net debt for the active period (current open period by default)."
         className="border-amber-400 shadow-xl shadow-amber-200/80 overflow-hidden"
         bodyClassName="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50"
       >
-        {!selectedPeriodId ? (
-          <EmptyState title="Select a debt period" />
-        ) : selectedPeriodTimelineQuery.isLoading ? (
+        {!activePeriodId ? (
+          <EmptyState title="No debt periods yet" />
+        ) : activePeriodTimelineQuery.isLoading ? (
           <Skeleton active paragraph={{ rows: 6 }} />
-        ) : selectedPeriodTimelineQuery.isError ? (
+        ) : activePeriodTimelineQuery.isError ? (
           <ErrorState
-            description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
-            onRetry={() => void selectedPeriodTimelineQuery.refetch()}
+            description={getErrorMessage(toAppError(activePeriodTimelineQuery.error))}
+            onRetry={() => void activePeriodTimelineQuery.refetch()}
           />
         ) : sortedPlayers.length === 0 ? (
           <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
@@ -452,72 +642,174 @@ export const MatchStakesPage = () => {
           </Tooltip>
         }
       >
-        {!selectedPeriodId ? (
-          <EmptyState title="Select a debt period" />
-        ) : selectedPeriodTimelineQuery.isLoading ? (
-          <Skeleton active paragraph={{ rows: 6 }} />
-        ) : selectedPeriodTimelineQuery.isError ? (
-          <ErrorState
-            description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
-            onRetry={() => void selectedPeriodTimelineQuery.refetch()}
-          />
-        ) : (
-          <div className="space-y-2.5">
-            <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
-              {(selectedTimeline?.history ?? []).map((historyItem) => (
-                <button
-                  key={historyItem.matchId}
-                  className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
-                  onClick={() => setSelectedMatchId(historyItem.matchId)}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Tag className="!text-[11px]" color="blue">
-                      {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
-                    </Tag>
-                    <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
-                  </div>
+        {selectedPeriodId ? (
+          selectedPeriodTimelineQuery.isLoading ? (
+            <Skeleton active paragraph={{ rows: 6 }} />
+          ) : selectedPeriodTimelineQuery.isError ? (
+            <ErrorState
+              description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
+              onRetry={() => void selectedPeriodTimelineQuery.refetch()}
+            />
+          ) : (
+            <div className="space-y-2.5">
+              <div className="hidden md:block">
+                <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
+                  {(selectedTimeline?.history ?? []).map((historyItem) => (
+                    <button
+                      key={historyItem.matchId}
+                      className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
+                      onClick={() => setSelectedMatchId(historyItem.matchId)}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Tag className="!text-[11px]" color="blue">
+                          {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
+                        </Tag>
+                        <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
+                      </div>
 
-                  <div className="mt-2 space-y-1.5">
-                    {sortTimelineRows(historyItem.players).map((row) => (
-                      <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
-                          <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
-                        </div>
-
-                        {historyViewMode === "detail" ? (
-                          <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                            <div className={`font-medium ${getPlacementToneClassName(row)}`}>
-                              {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
+                      <div className="mt-2 space-y-1.5">
+                        {sortTimelineRows(historyItem.players).map((row) => (
+                          <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
+                              <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
                             </div>
-                            <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
+
+                            {historyViewMode === "detail" ? (
+                              <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <div className={`font-medium ${getPlacementToneClassName(row)}`}>
+                                  {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
+                                </div>
+                                <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
+                              </div>
+                            ) : null}
                           </div>
-                        ) : null}
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="md:hidden">
+                {selectedTimeline ? renderMobilePeriodSequence(selectedTimeline) : null}
+              </div>
+
+              {(selectedTimeline?.history ?? []).length === 0 ? (
+                <div className="hidden rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-600 md:block">
+                  No matches in this period yet.
+                </div>
+              ) : null}
+
+              <div className="hidden rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5 md:block">
+                <div className="text-sm font-semibold text-slate-900">{`Init of Period #${selectedTimeline?.period.periodNo ?? "-"}`}</div>
+                {(initialPlayers ?? []).length === 0 ? (
+                  <div className="mt-2 text-sm text-slate-500">No players yet.</div>
+                ) : (
+                  <div className="mt-2 space-y-1">
+                    {initialPlayers.map((player) => (
+                      <div key={player.playerId} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-slate-600">{player.playerName}</span>
+                        <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
                       </div>
                     ))}
                   </div>
-                </button>
+                )}
+              </div>
+            </div>
+          )
+        ) : allHistoryPeriodsQuery.isLoading ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : allHistoryPeriodsQuery.isError ? (
+          <ErrorState
+            description={getErrorMessage(toAppError(allHistoryPeriodsQuery.error))}
+            onRetry={() => void allHistoryPeriodsQuery.refetch()}
+          />
+        ) : historyPeriodGroups.length === 0 ? (
+          <EmptyState title="No match history yet" description="Create matches to start building debt history." />
+        ) : (
+          <div className="space-y-3">
+            <div className="hidden space-y-3 md:block">
+              {historyPeriodGroups.map((periodTimeline) => (
+                <div key={periodTimeline.period.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-900">{`Period #${periodTimeline.period.periodNo}`}</div>
+                    <Tag color={periodTimeline.period.status === "OPEN" ? "green" : "default"}>
+                      {getEnumLabel(debtPeriodStatusLabels, periodTimeline.period.status)}
+                    </Tag>
+                  </div>
+                  <div className="mb-2 text-xs text-slate-500">{`Opened ${formatDateTime(periodTimeline.period.openedAt)} | Matches ${periodTimeline.summary.totalMatches}`}</div>
+
+                  <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
+                    {periodTimeline.history.map((historyItem) => (
+                      <button
+                        key={historyItem.matchId}
+                        className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
+                        onClick={() => setSelectedMatchId(historyItem.matchId)}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Tag className="!text-[11px]" color="blue">
+                            {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
+                          </Tag>
+                          <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
+                        </div>
+
+                        <div className="mt-2 space-y-1.5">
+                          {sortTimelineRows(historyItem.players).map((row) => (
+                            <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
+                                <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
+                              </div>
+
+                              {historyViewMode === "detail" ? (
+                                <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                  <div className={`font-medium ${getPlacementToneClassName(row)}`}>
+                                    {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
+                                  </div>
+                                  <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {periodTimeline.history.length === 0 ? (
+                    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-600">No matches in this period yet.</div>
+                  ) : null}
+
+                  <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-2.5">
+                    <div className="text-sm font-semibold text-slate-900">{`Init of Period #${periodTimeline.period.periodNo}`}</div>
+                    {periodTimeline.initialRows.length === 0 ? (
+                      <div className="mt-2 text-sm text-slate-500">No players yet.</div>
+                    ) : (
+                      <div className="mt-2 space-y-1">
+                        {sortTimelineRows(periodTimeline.initialRows).map((player) => (
+                          <div key={`${periodTimeline.period.id}-${player.playerId}`} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-slate-600">{player.playerName}</span>
+                            <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
 
-            {(selectedTimeline?.history ?? []).length === 0 ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-600">No matches in this period yet.</div>
-            ) : null}
+            <div className="space-y-2.5 md:hidden">
+              {historyPeriodGroups.map((periodTimeline) => renderMobilePeriodSequence(periodTimeline))}
+            </div>
 
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
-              <div className="text-sm font-semibold text-slate-900">Initial debt</div>
-              {(initialPlayers ?? []).length === 0 ? (
-                <div className="mt-2 text-sm text-slate-500">No players yet.</div>
-              ) : (
-                <div className="mt-2 space-y-1">
-                  {initialPlayers.map((player) => (
-                    <div key={player.playerId} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="text-slate-600">{player.playerName}</span>
-                      <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div ref={historyLoadMoreRef} className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5 text-center text-xs text-slate-500">
+              {allHistoryPeriodsQuery.isFetchingNextPage
+                ? "Loading older periods..."
+                : allHistoryPeriodsQuery.hasNextPage
+                  ? "Scroll to load older periods"
+                  : "All periods loaded"}
             </div>
           </div>
         )}
@@ -536,30 +828,34 @@ export const MatchStakesPage = () => {
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Period</label>
                 <Select
-                  value={selectedPeriodId}
+                  value={selectedPeriodId ?? ALL_PERIODS_FILTER_VALUE}
                   options={periodSelectOptions}
                   onChange={(value) => {
-                    setSelectedPeriodId(value);
+                    setSelectedPeriodId(value === ALL_PERIODS_FILTER_VALUE ? undefined : value);
                     setPeriodFilterOpen(false);
                   }}
                   placeholder="Select debt period"
                   className="w-full"
                 />
               </div>
-              {selectedPeriod ? (
+              {selectedFilterPeriod ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600">
-                  <div>{`Period #${selectedPeriod.periodNo}`}</div>
-                  <div>{`Opened: ${formatDateTime(selectedPeriod.openedAt)}`}</div>
-                  <div>{`Matches: ${selectedSummary?.totalMatches ?? 0}`}</div>
+                  <div>{`Period #${selectedFilterPeriod.periodNo}`}</div>
+                  <div>{`Opened: ${formatDateTime(selectedFilterPeriod.openedAt)}`}</div>
+                  <div>{`Matches: ${selectedFilterSummary?.totalMatches ?? "-"}`}</div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600">
+                  Showing full match history grouped by debt period.
+                </div>
+              )}
             </>
           )}
         </div>
       </Modal>
 
       <Modal
-        title={selectedPeriod ? `Record settlement - Period #${selectedPeriod.periodNo}` : "Record settlement"}
+        title={activePeriod ? `Record settlement - Period #${activePeriod.periodNo}` : "Record settlement"}
         open={settlementOpen}
         okText="Record settlement"
         okButtonProps={{ loading: createSettlementMutation.isPending, disabled: !canSubmitSettlement }}
@@ -775,7 +1071,7 @@ export const MatchStakesPage = () => {
       </Modal>
 
       <Modal
-        title={selectedPeriod ? `Close Period #${selectedPeriod.periodNo}` : "Close period"}
+        title={closePeriod ? `Close Period #${closePeriod.periodNo}` : "Close period"}
         open={closePeriodOpen}
         okText="Close period"
         okButtonProps={{
@@ -793,19 +1089,14 @@ export const MatchStakesPage = () => {
             await closePeriodMutation.mutateAsync({
               periodId: closePeriodTargetId,
               payload: {
-                note: closePeriodNote.trim() || null
+                note: closePeriodNote.trim() || null,
+                closingBalances
               }
             });
             message.success("Debt period closed.");
             setClosePeriodOpen(false);
           } catch (error) {
-            const appError = toAppError(error);
-            if (appError.code === "DEBT_PERIOD_OUTSTANDING_NOT_ZERO") {
-              setClosePeriodApiError("Cannot close this period because outstanding balances are not zero.");
-              return;
-            }
-
-            setClosePeriodApiError(getErrorMessage(appError));
+            setClosePeriodApiError(getErrorMessage(toAppError(error)));
           }
         }}
         onCancel={() => setClosePeriodOpen(false)}
@@ -814,12 +1105,53 @@ export const MatchStakesPage = () => {
           <FormApiError message={closePeriodApiError} />
 
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-            <div>{`Outstanding to receive: ${formatVnd(selectedSummary?.totalOutstandingReceiveVnd ?? 0)}`}</div>
-            <div>{`Outstanding to pay: ${formatVnd(selectedSummary?.totalOutstandingPayVnd ?? 0)}`}</div>
+            <div>{`Outstanding to receive: ${formatVnd(closeSummary?.totalOutstandingReceiveVnd ?? 0)}`}</div>
+            <div>{`Outstanding to pay: ${formatVnd(closeSummary?.totalOutstandingPayVnd ?? 0)}`}</div>
+            <div>{`Total matches: ${closeSummary?.totalMatches ?? 0}`}</div>
           </div>
 
-          {hasOutstanding ? <Alert type="warning" showIcon message="Outstanding may still be non-zero. Backend can reject close request." /> : null}
-          {!hasOutstanding ? <Alert type="success" showIcon message="All balances are settled. This period can be closed." /> : null}
+          {!canCloseWithMatch ? <Alert type="warning" showIcon message="Cannot close period with no matches. Need at least 1 match." /> : null}
+          {hasOutstanding ? <Alert type="info" showIcon message="Non-zero balances will be sent as closingBalances for rollover." /> : null}
+          {!hasOutstanding ? <Alert type="success" showIcon message="All balances are zero. This period closes with a clean rollover." /> : null}
+
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">Init cua period moi (closingBalances)</div>
+              <Button
+                size="small"
+                onClick={() => {
+                  setCloseBalanceDraft(
+                    Object.fromEntries(closeBalancePlayers.map((player) => [player.playerId, 0]))
+                  );
+                }}
+              >
+                Set all = 0
+              </Button>
+            </div>
+            {closeBalanceRows.length === 0 ? (
+              <div className="mt-2 text-sm text-slate-500">No players in this period.</div>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {closeBalanceRows.map((player) => (
+                  <div key={player.playerId} className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-600">{player.playerName}</span>
+                    <InputNumber
+                      value={player.draftNetVnd}
+                      precision={0}
+                      step={10000}
+                      className="w-[170px]"
+                      onChange={(value) =>
+                        setCloseBalanceDraft((previous) => ({
+                          ...previous,
+                          [player.playerId]: typeof value === "number" ? value : 0
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium">Confirmation</label>

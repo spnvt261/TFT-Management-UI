@@ -1,5 +1,5 @@
 import { Button, Card, Collapse, Descriptions, Empty, List, Tag } from "antd";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { RulesBreadcrumb } from "@/features/rules/components";
 import { useRuleSetDetail, useRuleSetVersionDetail } from "@/features/rules/hooks";
 import {
@@ -16,6 +16,7 @@ import { SectionCard } from "@/components/layout/SectionCard";
 import { formatDateTime } from "@/lib/format";
 
 export const RuleSetVersionDetailPage = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { ruleSetId, versionId } = useParams();
   const ruleSetQuery = useRuleSetDetail(ruleSetId);
@@ -48,7 +49,7 @@ export const RuleSetVersionDetailPage = () => {
       <RulesBreadcrumb
         items={[
           { label: "Rules", to: "/rules" },
-          { label: ruleSetLabel, to: `/rules/${ruleSetId}` },
+          { label: ruleSetLabel, to: `/rules/${ruleSetId}${location.search}` },
           { label: `Version v${version.versionNo}` }
         ]}
       />
@@ -57,7 +58,7 @@ export const RuleSetVersionDetailPage = () => {
         title={`Rule Version v${version.versionNo}`}
         subtitle="Business builder summary and compiled rules"
         actions={
-          <Button onClick={() => navigate(`/rules/${ruleSetId}`)}>
+          <Button onClick={() => navigate(`/rules/${ruleSetId}${location.search}`)}>
             Back
           </Button>
         }

@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, EditOutlined } from "@ant-design/icons";
 import { Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorState } from "@/components/states/ErrorState";
 import { PageLoading } from "@/components/states/PageLoading";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -51,9 +51,17 @@ const MetaItem = ({ label, value }: { label: string; value: string }) => (
 );
 
 export const RuleSetDetailPage = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { ruleSetId } = useParams();
   const detailQuery = useRuleSetDetail(ruleSetId);
+  const searchParams = new URLSearchParams(location.search);
+  const returnToParam = searchParams.get("returnTo");
+  const returnLabelParam = searchParams.get("returnLabel")?.trim();
+  const returnTo = returnToParam && returnToParam.startsWith("/") ? returnToParam : null;
+  const backTo = returnTo ?? "/rules";
+  const backLabel = returnTo ? `Back to ${returnLabelParam || "previous screen"}` : "Back";
+  const versionDetailPath = (versionId: string) => `/rules/${ruleSetId}/versions/${versionId}${location.search}`;
 
   if (!ruleSetId) {
     return <ErrorState title="Missing rule set id" />;
@@ -80,7 +88,7 @@ export const RuleSetDetailPage = () => {
           type="link"
           
           className="!px-0 font-medium underline"
-          onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}
+          onClick={() => navigate(versionDetailPath(version.id))}
         >
           v{value}
         </Button>
@@ -130,7 +138,7 @@ export const RuleSetDetailPage = () => {
       key: "actions",
       width: 130,
       render: (_, version) => (
-        <Button onClick={() => navigate(`/rules/${ruleSetId}/versions/${version.id}`)}>
+        <Button onClick={() => navigate(versionDetailPath(version.id))}>
           View detail
         </Button>
       )
@@ -148,8 +156,8 @@ export const RuleSetDetailPage = () => {
 
       <header className="mb-4 flex w-full justify-end">
         <div className="flex gap-2">
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rules")}>
-            Back
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backTo)}>
+            {backLabel}
           </Button>
           <Button
             type="primary"

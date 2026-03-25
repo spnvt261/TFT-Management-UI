@@ -689,6 +689,10 @@ export interface CreateDebtSettlementResultDto {
 
 export interface CloseDebtPeriodRequest {
   note?: string | null;
+  closingBalances: Array<{
+    playerId: string;
+    netVnd: number;
+  }>;
 }
 
 export interface CloseDebtPeriodResultDto {

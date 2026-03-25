@@ -1,4 +1,4 @@
-import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/api/queryKeys";
 import { toAppError } from "@/api/httpClient";
 import { matchStakesApi } from "@/api/matchStakesApi";
@@ -18,6 +18,7 @@ import type {
 
 const PERIODS_PAGE_SIZE = 100;
 const MATCHES_PAGE_SIZE = 100;
+const HISTORY_PERIODS_PAGE_SIZE = 3;
 
 const invalidateMatchStakesQueries = async (queryClient: QueryClient) => {
   await queryClient.invalidateQueries({ queryKey: ["match-stakes"] });
@@ -279,6 +280,24 @@ const buildTimelineFromFallback = (detail: DebtPeriodDetailDto, matches: MatchLi
   };
 };
 
+const fetchDebtPeriodTimeline = async (periodId: string) => {
+  const timelinePayload = await matchStakesApi.periodTimeline(periodId, { includeInitialSnapshot: true });
+  const normalizedTimeline = timelinePayload ? normalizeTimelinePayload(timelinePayload) : null;
+
+  if (normalizedTimeline) {
+    return normalizedTimeline;
+  }
+
+  const [detail, matches] = await Promise.all([matchStakesApi.periodDetail(periodId), fetchAllMatchesByPeriod(periodId)]);
+  return buildTimelineFromFallback(detail, matches);
+};
+
+export interface DebtPeriodHistoryPage {
+  page: number;
+  totalPages: number;
+  periodTimelines: DebtPeriodTimelineDto[];
+}
+
 export const useMatchStakesSummary = (query: ModuleSummaryQuery) =>
   useQuery({
     queryKey: queryKeys.matchStakes.summary(query),
@@ -334,22 +353,31 @@ export const useAllDebtPeriods = () =>
     queryFn: fetchAllDebtPeriods
   });
 
+export const useInfiniteDebtPeriodHistory = (enabled = true) =>
+  useInfiniteQuery({
+    queryKey: queryKeys.matchStakes.allPeriodsHistory({ pageSize: HISTORY_PERIODS_PAGE_SIZE }),
+    enabled,
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) => {
+      const page = typeof pageParam === "number" ? pageParam : 1;
+      const periodResult = await matchStakesApi.periods({ page, pageSize: HISTORY_PERIODS_PAGE_SIZE });
+      const totalPages = Math.max(1, periodResult.meta?.totalPages ?? 1);
+      const periodTimelines = await Promise.all(periodResult.data.map((period) => fetchDebtPeriodTimeline(period.id)));
+
+      return {
+        page,
+        totalPages,
+        periodTimelines
+      } satisfies DebtPeriodHistoryPage;
+    },
+    getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined)
+  });
+
 export const useDebtPeriodTimeline = (periodId?: string) =>
   useQuery({
     queryKey: queryKeys.matchStakes.periodTimeline(periodId ?? ""),
     enabled: Boolean(periodId),
-    queryFn: async () => {
-      const id = periodId as string;
-      const timelinePayload = await matchStakesApi.periodTimeline(id, { includeInitialSnapshot: true });
-      const normalizedTimeline = timelinePayload ? normalizeTimelinePayload(timelinePayload) : null;
-
-      if (normalizedTimeline) {
-        return normalizedTimeline;
-      }
-
-      const [detail, matches] = await Promise.all([matchStakesApi.periodDetail(id), fetchAllMatchesByPeriod(id)]);
-      return buildTimelineFromFallback(detail, matches);
-    }
+    queryFn: () => fetchDebtPeriodTimeline(periodId as string)
   });
 
 export const useCreateDebtPeriod = () => {

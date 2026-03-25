@@ -27,6 +27,7 @@ export const queryKeys = {
     matches: (query: unknown) => ["match-stakes", "matches", query] as const,
     currentPeriod: ["match-stakes", "debt-periods", "current"] as const,
     allPeriods: ["match-stakes", "debt-periods", "all"] as const,
+    allPeriodsHistory: (query: unknown) => ["match-stakes", "debt-periods", "history", query] as const,
     periods: (query: unknown) => ["match-stakes", "debt-periods", "list", query] as const,
     periodDetail: (periodId: string) => ["match-stakes", "debt-periods", "detail", periodId] as const,
     periodTimeline: (periodId: string) => ["match-stakes", "debt-periods", "timeline", periodId] as const
