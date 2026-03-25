@@ -8,6 +8,7 @@ interface ConfirmDangerProps {
   confirmText?: string;
   cancelText?: string;
   loading?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,6 +20,7 @@ export const ConfirmDanger = ({
   confirmText = "Confirm",
   cancelText = "Cancel",
   loading,
+  confirmDisabled,
   onConfirm,
   onCancel
 }: ConfirmDangerProps) => {
@@ -30,7 +32,7 @@ export const ConfirmDanger = ({
         <Typography.Paragraph className="text-slate-600">{description}</Typography.Paragraph>
         <div className="mt-6 grid grid-cols-2 gap-3">
           <Button onClick={onCancel}>{cancelText}</Button>
-          <Button danger type="primary" loading={loading} onClick={onConfirm}>
+          <Button danger type="primary" loading={loading} disabled={confirmDisabled} onClick={onConfirm}>
             {confirmText}
           </Button>
         </div>
@@ -44,7 +46,7 @@ export const ConfirmDanger = ({
       title={title}
       onCancel={onCancel}
       onOk={onConfirm}
-      okButtonProps={{ danger: true, loading }}
+      okButtonProps={{ danger: true, loading, disabled: confirmDisabled }}
       okText={confirmText}
       cancelText={cancelText}
     >

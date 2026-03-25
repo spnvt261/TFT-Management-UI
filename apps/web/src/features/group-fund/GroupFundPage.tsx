@@ -11,6 +11,8 @@ import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
+import { useAuth } from "@/features/auth/AuthContext";
+import { guardWritePermission } from "@/features/auth/permissions";
 import { EmptyState } from "@/components/states/EmptyState";
 import { ErrorState } from "@/components/states/ErrorState";
 import {
@@ -60,6 +62,8 @@ const toIsoValue = (value: Dayjs | null) => (value ? value.toISOString() : undef
 
 export const GroupFundPage = () => {
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
 
   const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>("minimal");
@@ -175,6 +179,10 @@ export const GroupFundPage = () => {
   };
 
   const openTransactionModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
+
     setTransactionApiError(null);
     reset({
       transactionType: "CONTRIBUTION",
@@ -198,10 +206,17 @@ export const GroupFundPage = () => {
         subtitle="Fund health overview: current obligations first, then detailed history."
         actions={
           <>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/group-fund/new")}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!canWriteActions}
+              onClick={() => canWriteActions && navigate("/group-fund/new")}
+            >
               Create match
             </Button>
-            <Button onClick={openTransactionModal}>Manual transaction</Button>
+            <Button disabled={!canWriteActions} onClick={openTransactionModal}>
+              Manual transaction
+            </Button>
           </>
         }
       />
@@ -315,7 +330,7 @@ export const GroupFundPage = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-900">Match History</div>
-                <Button size="small" type="link" onClick={() => navigate("/group-fund/new")}>
+                <Button size="small" type="link" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/group-fund/new")}>
                   Create match
                 </Button>
               </div>
@@ -417,7 +432,7 @@ export const GroupFundPage = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-900">Manual Transactions</div>
-                <Button size="small" onClick={openTransactionModal}>
+                <Button size="small" disabled={!canWriteActions} onClick={openTransactionModal}>
                   Create transaction
                 </Button>
               </div>
@@ -507,10 +522,18 @@ export const GroupFundPage = () => {
         </div>
       </Modal>
 
-      <Modal title="Create Manual Group Fund Transaction" open={transactionOpen} footer={null} onCancel={() => setTransactionOpen(false)}>
+      <Modal
+        title="Create Manual Group Fund Transaction"
+        open={transactionOpen && canWriteActions}
+        footer={null}
+        onCancel={() => setTransactionOpen(false)}
+      >
         <form
           className="space-y-4"
           onSubmit={handleSubmit(async (values) => {
+            if (!guardWritePermission(canWriteActions)) {
+              return;
+            }
             setTransactionApiError(null);
 
             try {
@@ -610,7 +633,7 @@ export const GroupFundPage = () => {
             <Alert type="info" showIcon message="Player is optional for adjustment transaction types." />
           ) : null}
 
-          <Button type="primary" htmlType="submit" loading={createTransactionMutation.isPending}>
+          <Button type="primary" htmlType="submit" loading={createTransactionMutation.isPending} disabled={!canWriteActions}>
             Create transaction
           </Button>
         </form>

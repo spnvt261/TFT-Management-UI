@@ -1,8 +1,9 @@
-import axios from "axios";
+import axios, { AxiosHeaders } from "axios";
 import type { AxiosError, AxiosRequestConfig } from "axios";
 import { message } from "antd";
 import { env } from "@/lib/env";
 import { getErrorMessage } from "@/lib/error-messages";
+import { clearAuthSession, getAuthSession } from "@/features/auth/session";
 import type { ApiErrorResponse, ApiSuccessResponse, PaginatedResult } from "@/types/api";
 import type { AppError } from "@/types/error";
 
@@ -16,6 +17,27 @@ export const httpClient = axios.create({
   baseURL: normalizeBaseUrl(env.apiBaseUrl),
   timeout: 15_000
 });
+
+const resolveRequestPath = (url?: string) => {
+  if (!url) {
+    return "";
+  }
+
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url;
+    }
+  }
+
+  return url;
+};
+
+const isPublicEndpoint = (url?: string) => {
+  const path = resolveRequestPath(url);
+  return path === "/" || path.endsWith("/health") || path.endsWith("/auth/login");
+};
 
 export const toAppError = (error: unknown): AppError => {
   if (axios.isAxiosError(error)) {
@@ -78,13 +100,68 @@ const notifyApiError = (error: unknown) => {
   });
 };
 
+httpClient.interceptors.request.use((config) => {
+  if (isPublicEndpoint(config.url)) {
+    return config;
+  }
+
+  const token = getAuthSession().accessToken;
+  if (!token) {
+    return config;
+  }
+
+  const headers = AxiosHeaders.from(config.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  config.headers = headers;
+
+  return config;
+});
+
 httpClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (!axios.isCancel(error)) {
-      notifyApiError(error);
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
     }
 
+    const appError = toAppError(error);
+    const isUnauthorized = appError.status === 401 || appError.code === "AUTH_UNAUTHORIZED";
+    if (isUnauthorized) {
+      clearAuthSession();
+
+      const signature = `${appError.status}|AUTH_UNAUTHORIZED|session-expired`;
+      if (shouldNotifyApiError(signature)) {
+        message.error({
+          content: "Session expired or invalid token. Please login again.",
+          key: "auth-unauthorized",
+          duration: 4
+        });
+      }
+
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        const from = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        const query = from ? `?from=${encodeURIComponent(from)}` : "";
+        window.location.assign(`/login${query}`);
+      }
+
+      return Promise.reject(error);
+    }
+
+    const isForbidden = appError.status === 403 || appError.code === "AUTH_FORBIDDEN";
+    if (isForbidden) {
+      const signature = `${appError.status}|AUTH_FORBIDDEN|permission-denied`;
+      if (shouldNotifyApiError(signature)) {
+        message.warning({
+          content: "You do not have permission for this action.",
+          key: "auth-forbidden",
+          duration: 4
+        });
+      }
+
+      return Promise.reject(error);
+    }
+
+    notifyApiError(error);
     return Promise.reject(error);
   }
 );

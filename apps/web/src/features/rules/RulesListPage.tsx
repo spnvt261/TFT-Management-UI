@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { Badge, Button, Checkbox, DatePicker, Input, Modal, Pagination, Radio, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useAllRuleSets, useRuleSetDetail } from "@/features/rules/hooks";
 import { normalizeMatchStakesBuilderConfig, summarizeMatchStakesBuilder } from "@/features/rules/builder-utils";
 import { RulesBreadcrumb } from "@/features/rules/components";
@@ -80,6 +81,8 @@ const LatestVersionSummary = ({ ruleSetId }: { ruleSetId: string }) => {
 export const RulesListPage = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
 
   const [page, setPage] = useState(1);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
@@ -260,10 +263,12 @@ export const RulesListPage = () => {
         subtitle="Manage business rules by module with builder-based Match Stakes summaries"
         actions={
           <>
-            <Button type="primary" onClick={() => navigate("/rules/new?module=MATCH_STAKES")}>
+            <Button type="primary" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/rules/new?module=MATCH_STAKES")}>
               Create Match Stakes Rule
             </Button>
-            <Button onClick={() => navigate("/rules/new?module=GROUP_FUND")}>Create Group Fund Rule</Button>
+            <Button disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/rules/new?module=GROUP_FUND")}>
+              Create Group Fund Rule
+            </Button>
           </>
         }
       />
@@ -424,8 +429,8 @@ export const RulesListPage = () => {
           <EmptyState
             title="No rules found"
             description="Try a different filter/search or create a new rule."
-            actionLabel="Create Match Stakes Rule"
-            onAction={() => navigate("/rules/new?module=MATCH_STAKES")}
+            actionLabel={canWriteActions ? "Create Match Stakes Rule" : undefined}
+            onAction={canWriteActions ? () => navigate("/rules/new?module=MATCH_STAKES") : undefined}
           />
         ) : isMobile ? (
           <div className="space-y-3">

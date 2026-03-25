@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { RouteErrorBoundary } from "@/router/RouteErrorBoundary";
+import { ProtectedRoute, RequireAdminRoute } from "@/router/ProtectedRoute";
 import DashboardRoute from "@/pages/DashboardRoute";
 import MatchStakesRoute from "@/pages/MatchStakesRoute";
 import MatchStakesCreateRoute from "@/pages/MatchStakesCreateRoute";
@@ -18,29 +19,94 @@ import PlayerCreateRoute from "@/pages/PlayerCreateRoute";
 import PlayerEditRoute from "@/pages/PlayerEditRoute";
 import MatchDetailRoute from "@/pages/MatchDetailRoute";
 import NotFoundRoute from "@/pages/NotFoundRoute";
+import LoginRoute from "@/pages/LoginRoute";
 
 export const router = createBrowserRouter([
   {
+    path: "/login",
+    element: <LoginRoute />
+  },
+  {
     path: "/",
-    element: <AppShellLayout />,
+    element: (
+      <ProtectedRoute>
+        <AppShellLayout />
+      </ProtectedRoute>
+    ),
     errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: "dashboard", element: <DashboardRoute /> },
       { path: "match-stakes", element: <MatchStakesRoute /> },
-      { path: "match-stakes/new", element: <MatchStakesCreateRoute /> },
+      {
+        path: "match-stakes/new",
+        element: (
+          <RequireAdminRoute fallbackTo="/match-stakes">
+            <MatchStakesCreateRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "group-fund", element: <GroupFundRoute /> },
-      { path: "group-fund/new", element: <GroupFundCreateRoute /> },
+      {
+        path: "group-fund/new",
+        element: (
+          <RequireAdminRoute fallbackTo="/group-fund">
+            <GroupFundCreateRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "rules", element: <RulesListRoute /> },
-      { path: "rules/new", element: <RulesCreateRoute /> },
+      {
+        path: "rules/new",
+        element: (
+          <RequireAdminRoute fallbackTo="/rules">
+            <RulesCreateRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "rules/:ruleSetId", element: <RulesDetailRoute /> },
-      { path: "rules/:ruleSetId/edit", element: <RulesEditRoute /> },
-      { path: "rules/:ruleSetId/versions/new", element: <RulesVersionCreateRoute /> },
+      {
+        path: "rules/:ruleSetId/edit",
+        element: (
+          <RequireAdminRoute fallbackTo="/rules">
+            <RulesEditRoute />
+          </RequireAdminRoute>
+        )
+      },
+      {
+        path: "rules/:ruleSetId/versions/new",
+        element: (
+          <RequireAdminRoute fallbackTo="/rules">
+            <RulesVersionCreateRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "rules/:ruleSetId/versions/:versionId", element: <RulesVersionDetailRoute /> },
-      { path: "rules/:ruleSetId/versions/:versionId/edit", element: <RulesVersionEditRoute /> },
+      {
+        path: "rules/:ruleSetId/versions/:versionId/edit",
+        element: (
+          <RequireAdminRoute fallbackTo="/rules">
+            <RulesVersionEditRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "players", element: <PlayersRoute /> },
-      { path: "players/new", element: <PlayerCreateRoute /> },
-      { path: "players/:playerId/edit", element: <PlayerEditRoute /> },
+      {
+        path: "players/new",
+        element: (
+          <RequireAdminRoute fallbackTo="/players">
+            <PlayerCreateRoute />
+          </RequireAdminRoute>
+        )
+      },
+      {
+        path: "players/:playerId/edit",
+        element: (
+          <RequireAdminRoute fallbackTo="/players">
+            <PlayerEditRoute />
+          </RequireAdminRoute>
+        )
+      },
       { path: "matches/:matchId", element: <MatchDetailRoute /> },
       { path: "not-found", element: <NotFoundRoute /> },
       { path: "*", element: <NotFoundRoute /> }

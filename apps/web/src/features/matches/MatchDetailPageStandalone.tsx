@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Button, Card, Input, Modal } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMatchDetail, useVoidMatch } from "@/features/matches/hooks";
+import { useAuth } from "@/features/auth/AuthContext";
+import { guardWritePermission } from "@/features/auth/permissions";
 import { MatchDetailView } from "@/features/matches/MatchDetailView";
 import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -13,6 +15,8 @@ import { toAppError } from "@/api/httpClient";
 
 export const MatchDetailPageStandalone = () => {
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
   const { matchId } = useParams();
   const [voidReason, setVoidReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -42,7 +46,17 @@ export const MatchDetailPageStandalone = () => {
         actions={
           <>
             <Button onClick={() => navigate(-1)}>Back</Button>
-            <Button danger disabled={detailQuery.data.status === "VOIDED"} onClick={() => setConfirmOpen(true)}>
+            <Button
+              danger
+              disabled={detailQuery.data.status === "VOIDED" || !canWriteActions}
+              onClick={() => {
+                if (!guardWritePermission(canWriteActions)) {
+                  return;
+                }
+
+                setConfirmOpen(true);
+              }}
+            >
               Void match
             </Button>
           </>
@@ -53,10 +67,13 @@ export const MatchDetailPageStandalone = () => {
 
       <Modal
         title="Confirm void match"
-        open={confirmOpen}
-        okButtonProps={{ danger: true, loading: voidMutation.isPending, disabled: voidReason.trim().length < 3 }}
+        open={confirmOpen && canWriteActions}
+        okButtonProps={{ danger: true, loading: voidMutation.isPending, disabled: !canWriteActions || voidReason.trim().length < 3 }}
         okText="Void"
         onOk={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
           await voidMutation.mutateAsync(voidReason.trim());
           setConfirmOpen(false);
           setVoidReason("");

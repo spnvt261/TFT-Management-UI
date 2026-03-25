@@ -15,6 +15,7 @@ import {
   summarizeMatchStakesBuilder
 } from "@/features/rules/builder-utils";
 import { useRuleSetDetail } from "@/features/rules/hooks";
+import { useAuth } from "@/features/auth/AuthContext";
 import { formatDateTime } from "@/lib/format";
 import { moduleLabels } from "@/lib/labels";
 import type { RuleSetVersionListItemDto } from "@/types/api";
@@ -53,6 +54,7 @@ const MetaItem = ({ label, value }: { label: string; value: string }) => (
 export const RuleSetDetailPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
   const { ruleSetId } = useParams();
   const detailQuery = useRuleSetDetail(ruleSetId);
   const searchParams = new URLSearchParams(location.search);
@@ -162,6 +164,7 @@ export const RuleSetDetailPage = () => {
           <Button
             type="primary"
             icon={<EditOutlined />}
+            disabled={!canWrite()}
             onClick={() => navigate(`/rules/${ruleSetId}/edit`)}
           >
             Edit rule

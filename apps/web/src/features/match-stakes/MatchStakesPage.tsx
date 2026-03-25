@@ -17,6 +17,8 @@ import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
+import { useAuth } from "@/features/auth/AuthContext";
+import { guardWritePermission } from "@/features/auth/permissions";
 import { EmptyState } from "@/components/states/EmptyState";
 import { ErrorState } from "@/components/states/ErrorState";
 import {
@@ -199,6 +201,8 @@ const sortHistoryDesc = (history: DebtPeriodTimelineMatchDto[]) => {
 
 export const MatchStakesPage = () => {
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
 
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
   const [selectedMatchContext, setSelectedMatchContext] = useState<MatchStakesDetailContext>();
@@ -362,9 +366,9 @@ export const MatchStakesPage = () => {
   );
 
   const settlementFormValid = settlementLines.length > 0 && settlementLines.every(isSettlementLineValid);
-  const canSubmitSettlement = Boolean(closePeriodTargetId) && settlementFormValid && !createSettlementMutation.isPending;
+  const canSubmitSettlement = canWriteActions && Boolean(closePeriodTargetId) && settlementFormValid && !createSettlementMutation.isPending;
   const canCloseWithMatch = (closeSummary?.totalMatches ?? 0) >= 1;
-  const canOpenClosePeriod = Boolean(closePeriodTargetId) && canCloseWithMatch;
+  const canOpenClosePeriod = canWriteActions && Boolean(closePeriodTargetId) && canCloseWithMatch;
   const expectedCloseConfirmText = closePeriod ? `Close Period ${closePeriod.periodNo}` : "";
   const canConfirmClosePeriod =
     canCloseWithMatch && Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
@@ -374,6 +378,9 @@ export const MatchStakesPage = () => {
   }));
 
   const openSettlementModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
     setSettlementApiError(null);
     setSettlementPostedAt(dayjs());
     setSettlementNote("");
@@ -383,6 +390,9 @@ export const MatchStakesPage = () => {
   };
 
   const openCreatePeriodModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
     setCreatePeriodApiError(null);
     setCreatePeriodTitle("");
     setCreatePeriodNote("");
@@ -390,6 +400,9 @@ export const MatchStakesPage = () => {
   };
 
   const openClosePeriodModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
     setClosePeriodApiError(null);
     setClosePeriodNote("");
     setClosePeriodConfirmText("");
@@ -519,11 +532,19 @@ export const MatchStakesPage = () => {
         subtitle="Simple debt notebook by period: current totals first, then match-by-match accumulation."
         actions={
           <>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/match-stakes/new")}>
               Create match
             </Button>
             {hasOpenPeriod ? (
-              <Tooltip title={canOpenClosePeriod ? "Close this period (requires confirmation in modal)." : "Need at least 1 match to close period."}>
+              <Tooltip
+                title={
+                  !canWriteActions
+                    ? "Admin only."
+                    : canOpenClosePeriod
+                      ? "Close this period (requires confirmation in modal)."
+                      : "Need at least 1 match to close period."
+                }
+              >
                 <span>
                   <Button onClick={openClosePeriodModal} disabled={!canOpenClosePeriod}>
                     Close period
@@ -531,7 +552,11 @@ export const MatchStakesPage = () => {
                 </span>
               </Tooltip>
             ) : null}
-            {!hasOpenPeriod ? <Button onClick={openCreatePeriodModal}>New debt period</Button> : null}
+            {!hasOpenPeriod ? (
+              <Button disabled={!canWriteActions} onClick={openCreatePeriodModal}>
+                New debt period
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -563,8 +588,8 @@ export const MatchStakesPage = () => {
             <EmptyState
               title="No debt periods yet"
               description="Create a debt period to start tracking debt accumulation by match."
-              actionLabel="New debt period"
-              onAction={openCreatePeriodModal}
+              actionLabel={canWriteActions ? "New debt period" : undefined}
+              onAction={canWriteActions ? openCreatePeriodModal : undefined}
             />
           ) : (
             <div className="space-y-3">
@@ -574,7 +599,7 @@ export const MatchStakesPage = () => {
                   showIcon
                   message="No open debt period right now. You can still review historical periods below."
                   action={
-                    <Button size="small" onClick={openCreatePeriodModal}>
+                    <Button size="small" disabled={!canWriteActions} onClick={openCreatePeriodModal}>
                       New debt period
                     </Button>
                   }
@@ -900,10 +925,13 @@ export const MatchStakesPage = () => {
 
       <Modal
         title={activePeriod ? `Record settlement - Period #${activePeriod.periodNo}` : "Record settlement"}
-        open={settlementOpen}
+        open={settlementOpen && canWriteActions}
         okText="Record settlement"
         okButtonProps={{ loading: createSettlementMutation.isPending, disabled: !canSubmitSettlement }}
         onOk={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
           if (!closePeriodTargetId || !canSubmitSettlement) {
             return;
           }
@@ -1081,10 +1109,13 @@ export const MatchStakesPage = () => {
 
       <Modal
         title="Create new debt period"
-        open={createPeriodOpen}
+        open={createPeriodOpen && canWriteActions}
         okText="Create period"
-        okButtonProps={{ loading: createPeriodMutation.isPending }}
+        okButtonProps={{ loading: createPeriodMutation.isPending, disabled: !canWriteActions }}
         onOk={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
           setCreatePeriodApiError(null);
 
           try {
@@ -1116,13 +1147,16 @@ export const MatchStakesPage = () => {
 
       <Modal
         title={closePeriod ? `Close Period #${closePeriod.periodNo}` : "Close period"}
-        open={closePeriodOpen}
+        open={closePeriodOpen && canWriteActions}
         okText="Close period"
         okButtonProps={{
           loading: closePeriodMutation.isPending,
-          disabled: !closePeriodTargetId || !canConfirmClosePeriod
+          disabled: !canWriteActions || !closePeriodTargetId || !canConfirmClosePeriod
         }}
         onOk={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
           if (!closePeriodTargetId || !canConfirmClosePeriod) {
             return;
           }
@@ -1163,6 +1197,7 @@ export const MatchStakesPage = () => {
               <div className="text-sm font-semibold text-slate-900">Init cua period moi (closingBalances)</div>
               <Button
                 size="small"
+                disabled={!canWriteActions}
                 onClick={() => {
                   setCloseBalanceDraft(
                     Object.fromEntries(closeBalancePlayers.map((player) => [player.playerId, 0]))
@@ -1183,6 +1218,7 @@ export const MatchStakesPage = () => {
                       value={player.draftNetVnd}
                       precision={0}
                       step={10000}
+                      disabled={!canWriteActions}
                       className="w-[170px]"
                       onChange={(value) =>
                         setCloseBalanceDraft((previous) => ({

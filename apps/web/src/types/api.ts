@@ -30,6 +30,19 @@ export interface PaginatedResult<T> {
   meta?: PaginationMeta;
 }
 
+export type RoleCode = "ADMIN" | "USER";
+
+export interface LoginRequest {
+  accessCode: string;
+}
+
+export interface LoginResponseDto {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: number;
+  role: RoleCode;
+}
+
 export type ModuleType = "MATCH_STAKES" | "GROUP_FUND";
 export type MatchStatus = "DRAFT" | "CALCULATED" | "POSTED" | "VOIDED";
 export type DebtPeriodStatus = "OPEN" | "CLOSED";
@@ -547,6 +560,8 @@ export interface DebtPeriodDto {
   periodNo: number;
   title: string | null;
   note: string | null;
+  closeNote?: string | null;
+  nextPeriodId?: string | null;
   status: DebtPeriodStatus;
   openedAt: string;
   closedAt: string | null;
@@ -556,6 +571,7 @@ export interface DebtPeriodPlayerSummaryDto {
   playerId: string;
   playerName: string;
   totalMatches: number;
+  initNetVnd?: number;
   accruedNetVnd: number;
   settledPaidVnd: number;
   settledReceivedVnd: number;
@@ -699,6 +715,12 @@ export interface CloseDebtPeriodResultDto {
   id: string;
   status: "CLOSED";
   closedAt: string | null;
+  nextPeriod?: DebtPeriodDto;
+  carryForwardBalances?: Array<{
+    playerId: string;
+    playerName: string;
+    netVnd: number;
+  }>;
 }
 
 export interface MatchStakesSummaryDto {

@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Button, Input, Pagination, Segmented, Tag } from "antd";
 import { useNavigate } from "react-router-dom";
 import { useDeactivatePlayer, usePlayers, useUpdatePlayer } from "@/features/players/hooks";
+import { useAuth } from "@/features/auth/AuthContext";
+import { guardWritePermission } from "@/features/auth/permissions";
 import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import { EmptyState } from "@/components/states/EmptyState";
@@ -19,6 +21,8 @@ export const PlayersPage = () => {
   const [page, setPage] = useState(1);
   const [targetPlayer, setTargetPlayer] = useState<PlayerDto | null>(null);
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
 
   const query = useMemo(
     () => ({
@@ -52,7 +56,11 @@ export const PlayersPage = () => {
       <PageHeader
         title="Players"
         subtitle="Manage active members for match entry and rule resolution."
-        actions={<Button type="primary" onClick={() => navigate("/players/new")}>New Player</Button>}
+        actions={
+          <Button type="primary" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/players/new")}>
+            New Player
+          </Button>
+        }
       />
 
       <FilterBar>
@@ -98,19 +106,23 @@ export const PlayersPage = () => {
                     <div className="text-xs text-slate-500">Slug: {player.slug ?? "-"}</div>
 
                     <div className="flex gap-2">
-                      <Button block onClick={() => navigate(`/players/${player.id}/edit`)}>
+                      <Button block disabled={!canWriteActions} onClick={() => canWriteActions && navigate(`/players/${player.id}/edit`)}>
                         Edit
                       </Button>
                       {player.isActive ? (
-                        <Button block danger onClick={() => setTargetPlayer(player)}>
+                        <Button block danger disabled={!canWriteActions} onClick={() => canWriteActions && setTargetPlayer(player)}>
                           Deactivate
                         </Button>
                       ) : (
                         <Button
                           block
                           type="primary"
+                          disabled={!canWriteActions}
                           loading={reactivateMutation.isPending && targetPlayer?.id === player.id}
                           onClick={async () => {
+                            if (!guardWritePermission(canWriteActions)) {
+                              return;
+                            }
                             setTargetPlayer(player);
                             await reactivateMutation.mutateAsync({ isActive: true });
                             setTargetPlayer(null);
@@ -143,9 +155,13 @@ export const PlayersPage = () => {
         title="Deactivate player?"
         description={`This will mark ${targetPlayer?.displayName ?? "player"} as inactive and hide them from quick-entry choices.`}
         confirmText="Deactivate"
+        confirmDisabled={!canWriteActions}
         loading={deactivateMutation.isPending}
         onCancel={() => setTargetPlayer(null)}
         onConfirm={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
           if (!targetPlayer) {
             return;
           }

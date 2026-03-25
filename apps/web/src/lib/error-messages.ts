@@ -1,6 +1,9 @@
 import type { AppError } from "@/types/error";
 
 export const knownErrorMessages: Record<string, string> = {
+  AUTH_LOGIN_INVALID: "Access code is required.",
+  AUTH_UNAUTHORIZED: "Session expired or invalid token. Please login again.",
+  AUTH_FORBIDDEN: "You do not have permission for this action.",
   MATCH_DUPLICATE_PLAYER: "Players must be unique.",
   MATCH_DUPLICATE_PLACEMENT: "Placements must be unique.",
   MATCH_PLACEMENT_INVALID: "Placements must be integers from 1 to 8.",

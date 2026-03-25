@@ -4,6 +4,7 @@ import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useAuth } from "@/features/auth/AuthContext";
 import { quickMatchSchema, type QuickMatchFormValues, defaultQuickMatchParticipants } from "@/features/quick-match/schema";
 import type { MatchDetailDto, ModuleType, RuleSetDto } from "@/types/api";
 import { presetsApi } from "@/api/presetsApi";
@@ -33,6 +34,8 @@ const ensureCount = (input: number | null | undefined): 3 | 4 => (input === 3 ? 
 
 export const QuickMatchEntry = ({ open, module, onClose }: QuickMatchEntryProps) => {
   const isMobile = useIsMobile();
+  const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [createdMatch, setCreatedMatch] = useState<MatchDetailDto | null>(null);
@@ -97,12 +100,14 @@ export const QuickMatchEntry = ({ open, module, onClose }: QuickMatchEntryProps)
   const createMatchMutation = useMutation({
     mutationFn: matchesApi.create,
     onSuccess: async (result, variables) => {
-      await presetsApi.update(module, {
-        lastRuleSetId: variables.ruleSetId,
-        lastRuleSetVersionId: variables.ruleSetVersionId ?? null,
-        lastSelectedPlayerIds: variables.participants.map((participant) => participant.playerId),
-        lastParticipantCount: ensureCount(variables.participants.length)
-      });
+      if (canWriteActions) {
+        await presetsApi.update(module, {
+          lastRuleSetId: variables.ruleSetId,
+          lastRuleSetVersionId: variables.ruleSetVersionId ?? null,
+          lastSelectedPlayerIds: variables.participants.map((participant) => participant.playerId),
+          lastParticipantCount: ensureCount(variables.participants.length)
+        });
+      }
       await invalidateAfterMatchCreate(queryClient, module);
       setCreatedMatch(result);
     }
