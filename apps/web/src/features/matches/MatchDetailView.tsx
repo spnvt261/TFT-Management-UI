@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { DownOutlined, UpOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Descriptions, Tag, Typography } from "antd";
+import dayjs from "dayjs";
+import { useGroupFundSummary } from "@/features/group-fund/hooks";
 import { useRuleSetVersionDetail } from "@/features/rules/hooks";
 import type { MatchDetailDto } from "@/types/api";
 import { formatDateTime, formatVnd } from "@/lib/format";
@@ -39,8 +41,13 @@ const getDebtToneClassName = (value: number) => {
 export const MatchDetailView = ({ match, matchNo, periodNo, participantLedgerRows = [] }: MatchDetailViewProps) => {
   const [participantViewMode, setParticipantViewMode] = useState<ParticipantViewMode>("simple");
   const [ruleDetailsOpen, setRuleDetailsOpen] = useState(false);
+  const isGroupFundMatch = match.module === "GROUP_FUND";
+  const ledgerAnchorIso = match.settlement?.postedToLedgerAt ?? match.playedAt;
+  const beforeAnchorIso = dayjs(ledgerAnchorIso).subtract(1, "second").toISOString();
 
   const ruleVersionDetailQuery = useRuleSetVersionDetail(match.ruleSet.id, match.ruleSetVersion?.id);
+  const groupFundSummaryBeforeQuery = useGroupFundSummary({ to: beforeAnchorIso }, isGroupFundMatch);
+  const groupFundSummaryAfterQuery = useGroupFundSummary({ to: ledgerAnchorIso }, isGroupFundMatch);
 
   const participantLedgerByPlayer = useMemo(
     () => new Map(participantLedgerRows.map((row) => [row.playerId, row])),
@@ -70,6 +77,33 @@ export const MatchDetailView = ({ match, matchNo, periodNo, participantLedgerRow
     [match.participants, participantLedgerByPlayer]
   );
 
+  const matchFundInVnd = match.settlement?.totalFundInVnd ?? 0;
+  const matchFundOutVnd = match.settlement?.totalFundOutVnd ?? 0;
+  const matchFundDeltaVnd = matchFundInVnd - matchFundOutVnd;
+
+  const beforeBalance = groupFundSummaryBeforeQuery.data?.fundBalanceVnd;
+  const afterBalance = groupFundSummaryAfterQuery.data?.fundBalanceVnd;
+
+  // Prefer the "before" balance as source of truth, then apply this match delta.
+  // This avoids including other ledger entries that may share the exact same posted time.
+  const fundBeforeMatchVnd =
+    typeof beforeBalance === "number"
+      ? beforeBalance
+      : typeof afterBalance === "number"
+        ? afterBalance - matchFundDeltaVnd
+        : undefined;
+  const fundAfterMatchVnd =
+    typeof fundBeforeMatchVnd === "number"
+      ? fundBeforeMatchVnd + matchFundDeltaVnd
+      : typeof afterBalance === "number"
+        ? afterBalance
+        : undefined;
+
+  const hasFundSnapshot = typeof fundBeforeMatchVnd === "number" && typeof fundAfterMatchVnd === "number";
+  const isFundSnapshotLoading =
+    (groupFundSummaryBeforeQuery.isLoading || groupFundSummaryAfterQuery.isLoading) && !hasFundSnapshot;
+  const isFundSnapshotUnavailable = !hasFundSnapshot && groupFundSummaryBeforeQuery.isError && groupFundSummaryAfterQuery.isError;
+
   return (
     <div className="space-y-4">
       {match.status === "VOIDED" ? (
@@ -93,6 +127,31 @@ export const MatchDetailView = ({ match, matchNo, periodNo, participantLedgerRow
           <Descriptions.Item label="Note">{match.note || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
+
+      {isGroupFundMatch ? (
+        <Card title="Group Fund Snapshot">
+          {isFundSnapshotLoading ? (
+            <Typography.Text type="secondary">Loading fund snapshot...</Typography.Text>
+          ) : isFundSnapshotUnavailable ? (
+            <Typography.Text type="secondary">Cannot load fund snapshot at match time.</Typography.Text>
+          ) : (
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <div className="text-xs text-slate-500">Fund before match</div>
+                <div className="mt-1 font-semibold text-slate-900">{typeof fundBeforeMatchVnd === "number" ? formatVnd(fundBeforeMatchVnd) : "-"}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <div className="text-xs text-slate-500">Fund change this match</div>
+                <div className={`mt-1 font-semibold ${matchFundDeltaVnd >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{formatSignedVnd(matchFundDeltaVnd)}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <div className="text-xs text-slate-500">Fund after match</div>
+                <div className="mt-1 font-semibold text-slate-900">{typeof fundAfterMatchVnd === "number" ? formatVnd(fundAfterMatchVnd) : "-"}</div>
+              </div>
+            </div>
+          )}
+        </Card>
+      ) : null}
 
       <Card
         title="Rule Details"

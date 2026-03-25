@@ -5,6 +5,7 @@ import DashboardRoute from "@/pages/DashboardRoute";
 import MatchStakesRoute from "@/pages/MatchStakesRoute";
 import MatchStakesCreateRoute from "@/pages/MatchStakesCreateRoute";
 import GroupFundRoute from "@/pages/GroupFundRoute";
+import GroupFundCreateRoute from "@/pages/GroupFundCreateRoute";
 import RulesListRoute from "@/pages/RulesListRoute";
 import RulesCreateRoute from "@/pages/RulesCreateRoute";
 import RulesDetailRoute from "@/pages/RulesDetailRoute";
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       { path: "match-stakes", element: <MatchStakesRoute /> },
       { path: "match-stakes/new", element: <MatchStakesCreateRoute /> },
       { path: "group-fund", element: <GroupFundRoute /> },
+      { path: "group-fund/new", element: <GroupFundCreateRoute /> },
       { path: "rules", element: <RulesListRoute /> },
       { path: "rules/new", element: <RulesCreateRoute /> },
       { path: "rules/:ruleSetId", element: <RulesDetailRoute /> },

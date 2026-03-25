@@ -4,10 +4,11 @@ import { queryKeys } from "@/api/queryKeys";
 import { invalidateAfterGroupFundTransaction } from "@/lib/invalidation";
 import type { GroupFundTransactionQuery, ModuleLedgerQuery, ModuleSummaryQuery } from "@/types/api";
 
-export const useGroupFundSummary = (query: ModuleSummaryQuery) =>
+export const useGroupFundSummary = (query: ModuleSummaryQuery, enabled = true) =>
   useQuery({
     queryKey: queryKeys.groupFund.summary(query),
-    queryFn: () => groupFundApi.summary(query)
+    queryFn: () => groupFundApi.summary(query),
+    enabled
   });
 
 export const useGroupFundLedger = (query: ModuleLedgerQuery) =>
