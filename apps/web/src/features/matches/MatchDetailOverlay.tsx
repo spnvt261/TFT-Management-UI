@@ -1,58 +1,50 @@
-import { useState } from "react";
-import { Button, Drawer, Input, Modal } from "antd";
+import { CloseOutlined } from "@ant-design/icons";
+import { Button, Drawer } from "antd";
 import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
-import { useMatchDetail, useVoidMatch } from "@/features/matches/hooks";
+import { useMatchDetail } from "@/features/matches/hooks";
 import { MatchDetailView } from "@/features/matches/MatchDetailView";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { toAppError } from "@/api/httpClient";
 import { getErrorMessage } from "@/lib/error-messages";
 
+export interface MatchStakesDetailContext {
+  matchNo?: number | null;
+  periodNo?: number | null;
+  participantLedgerRows?: Array<{
+    playerId: string;
+    playerName: string;
+    placement: number | null;
+    matchNetVnd: number;
+    debtBeforeVnd: number;
+    debtAfterVnd: number;
+  }>;
+}
+
 interface MatchDetailOverlayProps {
   matchId?: string;
   open: boolean;
   onClose: () => void;
+  matchStakesContext?: MatchStakesDetailContext;
 }
 
-export const MatchDetailOverlay = ({ matchId, open, onClose }: MatchDetailOverlayProps) => {
+export const MatchDetailOverlay = ({ matchId, open, onClose, matchStakesContext }: MatchDetailOverlayProps) => {
   const isMobile = useIsMobile();
-  const [voidReason, setVoidReason] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const matchQuery = useMatchDetail(matchId);
-  const voidMutation = useVoidMatch(matchId || "");
 
   const content = matchQuery.isLoading ? (
     <PageLoading label="Loading match detail..." />
   ) : matchQuery.isError ? (
     <ErrorState description={getErrorMessage(toAppError(matchQuery.error))} onRetry={() => void matchQuery.refetch()} />
   ) : matchQuery.data ? (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          danger
-          disabled={matchQuery.data.status === "VOIDED"}
-          onClick={() => setConfirmOpen(true)}
-          aria-label="Void match"
-        >
-          Void match
-        </Button>
-      </div>
-      <MatchDetailView match={matchQuery.data} />
-    </div>
+    <MatchDetailView
+      match={matchQuery.data}
+      matchNo={matchStakesContext?.matchNo ?? null}
+      periodNo={matchStakesContext?.periodNo ?? matchQuery.data.debtPeriodNo ?? null}
+      participantLedgerRows={matchStakesContext?.participantLedgerRows ?? []}
+    />
   ) : null;
-
-  const modalContent = (
-    <div className="space-y-3">
-      <p className="text-sm text-slate-600">Voiding keeps accounting history and creates reversal entries.</p>
-      <Input.TextArea
-        value={voidReason}
-        onChange={(event) => setVoidReason(event.target.value)}
-        placeholder="Reason (min 3 chars)"
-        rows={3}
-      />
-    </div>
-  );
 
   return (
     <>
@@ -63,8 +55,9 @@ export const MatchDetailOverlay = ({ matchId, open, onClose }: MatchDetailOverla
           width="100%"
           open={open}
           onClose={onClose}
+          closeIcon={null}
           destroyOnHidden
-          extra={<Button onClick={onClose}>Close</Button>}
+          extra={<Button icon={<CloseOutlined />} onClick={onClose}>Close</Button>}
         >
           {content}
         </Drawer>
@@ -75,31 +68,13 @@ export const MatchDetailOverlay = ({ matchId, open, onClose }: MatchDetailOverla
           width={680}
           open={open}
           onClose={onClose}
+          closeIcon={null}
           destroyOnHidden
-          extra={<Button onClick={onClose}>Close</Button>}
+          extra={<Button icon={<CloseOutlined />} onClick={onClose}>Close</Button>}
         >
           {content}
         </Drawer>
       )}
-
-      <Modal
-        title="Confirm void match"
-        open={confirmOpen}
-        okButtonProps={{ danger: true, loading: voidMutation.isPending, disabled: voidReason.trim().length < 3 }}
-        okText="Void match"
-        onOk={async () => {
-          if (!matchId) {
-            return;
-          }
-          await voidMutation.mutateAsync(voidReason.trim());
-          setConfirmOpen(false);
-          onClose();
-          setVoidReason("");
-        }}
-        onCancel={() => setConfirmOpen(false)}
-      >
-        {modalContent}
-      </Modal>
     </>
   );
 };

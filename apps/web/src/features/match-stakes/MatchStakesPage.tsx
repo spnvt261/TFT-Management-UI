@@ -28,7 +28,7 @@ import {
   useDebtPeriodTimeline,
   useInfiniteDebtPeriodHistory
 } from "@/features/match-stakes/hooks";
-import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
+import { MatchDetailOverlay, type MatchStakesDetailContext } from "@/features/matches/MatchDetailOverlay";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { debtPeriodStatusLabels, getEnumLabel } from "@/lib/labels";
@@ -200,6 +200,7 @@ export const MatchStakesPage = () => {
   const navigate = useNavigate();
 
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
+  const [selectedMatchContext, setSelectedMatchContext] = useState<MatchStakesDetailContext>();
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>();
   const historyLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const [showDebtPeriodDetail, setShowDebtPeriodDetail] = useState(false);
@@ -304,6 +305,7 @@ export const MatchStakesPage = () => {
   const selectedFilterPeriod =
     selectedTimeline?.period ?? (selectedPeriodId ? allPeriods.find((period) => period.id === selectedPeriodId) : undefined);
   const selectedFilterSummary = selectedTimeline?.summary;
+  const hideCurrentDebtSection = Boolean(selectedPeriodId && selectedFilterPeriod?.status === "CLOSED");
 
   const sortedPlayers = useMemo(() => sortOutstandingPlayers(activeTimeline?.players ?? []), [activeTimeline?.players]);
   const initialPlayers = useMemo(
@@ -407,6 +409,22 @@ export const MatchStakesPage = () => {
     }))
   ];
 
+  const openMatchDetail = (historyItem: DebtPeriodTimelineMatchDto, periodNo?: number | null) => {
+    setSelectedMatchId(historyItem.matchId);
+    setSelectedMatchContext({
+      matchNo: historyItem.matchNo,
+      periodNo: periodNo ?? null,
+      participantLedgerRows: historyItem.players.map((row) => ({
+        playerId: row.playerId,
+        playerName: row.playerName,
+        placement: typeof row.tftPlacement === "number" ? row.tftPlacement : row.relativeRank,
+        matchNetVnd: row.matchNetVnd,
+        debtBeforeVnd: row.cumulativeNetVnd - row.matchNetVnd,
+        debtAfterVnd: row.cumulativeNetVnd
+      }))
+    });
+  };
+
   const renderMobilePeriodSequence = (periodTimeline: DebtPeriodTimelineDto) => {
     const mobileMatches = sortHistoryDesc(periodTimeline.history);
 
@@ -427,7 +445,7 @@ export const MatchStakesPage = () => {
               <button
                 key={historyItem.matchId}
                 className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500"
-                onClick={() => setSelectedMatchId(historyItem.matchId)}
+                onClick={() => openMatchDetail(historyItem, periodTimeline.period.periodNo)}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Tag className="!text-[11px]" color="blue">
@@ -596,37 +614,39 @@ export const MatchStakesPage = () => {
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title="Current Debt"
-        description="Outstanding net debt for the active period (current open period by default)."
-        className="border-amber-400 shadow-xl shadow-amber-200/80 overflow-hidden"
-        bodyClassName="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50"
-      >
-        {!activePeriodId ? (
-          <EmptyState title="No debt periods yet" />
-        ) : activePeriodTimelineQuery.isLoading ? (
-          <Skeleton active paragraph={{ rows: 6 }} />
-        ) : activePeriodTimelineQuery.isError ? (
-          <ErrorState
-            description={getErrorMessage(toAppError(activePeriodTimelineQuery.error))}
-            onRetry={() => void activePeriodTimelineQuery.refetch()}
-          />
-        ) : sortedPlayers.length === 0 ? (
-          <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
-        ) : (
-          <div className="space-y-2.5">
-            {sortedPlayers.map((player) => (
-              <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.outstandingNetVnd)}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-base font-semibold text-slate-900">{player.playerName}</div>
-                  <div className={`text-xl font-bold ${getOutstandingClassName(player.outstandingNetVnd)}`}>{formatSignedVnd(player.outstandingNetVnd)}</div>
+      {!hideCurrentDebtSection ? (
+        <SectionCard
+          title="Current Debt"
+          description="Outstanding net debt for the active period (current open period by default)."
+          className="border-amber-400 shadow-xl shadow-amber-200/80 overflow-hidden"
+          bodyClassName="bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50"
+        >
+          {!activePeriodId ? (
+            <EmptyState title="No debt periods yet" />
+          ) : activePeriodTimelineQuery.isLoading ? (
+            <Skeleton active paragraph={{ rows: 6 }} />
+          ) : activePeriodTimelineQuery.isError ? (
+            <ErrorState
+              description={getErrorMessage(toAppError(activePeriodTimelineQuery.error))}
+              onRetry={() => void activePeriodTimelineQuery.refetch()}
+            />
+          ) : sortedPlayers.length === 0 ? (
+            <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
+          ) : (
+            <div className="space-y-2.5">
+              {sortedPlayers.map((player) => (
+                <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.outstandingNetVnd)}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-base font-semibold text-slate-900">{player.playerName}</div>
+                    <div className={`text-xl font-bold ${getOutstandingClassName(player.outstandingNetVnd)}`}>{formatSignedVnd(player.outstandingNetVnd)}</div>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{`Accrued ${formatVnd(player.accruedNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
                 </div>
-                <div className="mt-1 text-xs text-slate-500">{`Accrued ${formatVnd(player.accruedNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </SectionCard>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="History"
@@ -658,7 +678,7 @@ export const MatchStakesPage = () => {
                     <button
                       key={historyItem.matchId}
                       className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
-                      onClick={() => setSelectedMatchId(historyItem.matchId)}
+                      onClick={() => openMatchDetail(historyItem, selectedTimeline?.period.periodNo)}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <Tag className="!text-[11px]" color="blue">
@@ -745,7 +765,7 @@ export const MatchStakesPage = () => {
                       <button
                         key={historyItem.matchId}
                         className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
-                        onClick={() => setSelectedMatchId(historyItem.matchId)}
+                        onClick={() => openMatchDetail(historyItem, periodTimeline.period.periodNo)}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <Tag className="!text-[11px]" color="blue">
@@ -815,7 +835,15 @@ export const MatchStakesPage = () => {
         )}
       </SectionCard>
 
-      <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
+      <MatchDetailOverlay
+        open={Boolean(selectedMatchId)}
+        matchId={selectedMatchId}
+        matchStakesContext={selectedMatchContext}
+        onClose={() => {
+          setSelectedMatchId(undefined);
+          setSelectedMatchContext(undefined);
+        }}
+      />
 
       <Modal title="Filter Debt Period" open={periodFilterOpen} footer={null} onCancel={() => setPeriodFilterOpen(false)}>
         <div className="space-y-3">
