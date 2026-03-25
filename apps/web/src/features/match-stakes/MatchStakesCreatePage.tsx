@@ -245,7 +245,6 @@ export const MatchStakesCreatePage = () => {
     onSuccess: async () => {
       await invalidateAfterMatchCreate(queryClient, "MATCH_STAKES");
       message.success("Match created successfully.");
-      navigate("/match-stakes", { replace: true });
     },
     onError: (error) => {
       setFormError(getErrorMessage(toAppError(error)));
@@ -552,6 +551,8 @@ export const MatchStakesCreatePage = () => {
     };
 
     await createMutation.mutateAsync(payload);
+    setConfirmManualCreateOpen(false);
+    navigate("/match-stakes", { replace: true });
   };
 
   const handleCreateMatch = async () => {
@@ -881,7 +882,6 @@ export const MatchStakesCreatePage = () => {
         okButtonProps={{ loading: createMutation.isPending }}
         onOk={async () => {
           await submitCreateMatch();
-          setConfirmManualCreateOpen(false);
         }}
         onCancel={() => setConfirmManualCreateOpen(false)}
       >

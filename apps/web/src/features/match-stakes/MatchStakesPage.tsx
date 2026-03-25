@@ -52,6 +52,7 @@ type HistoryViewMode = "minimal" | "detail";
 type CloseBalanceDraft = Record<string, number>;
 
 const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.match-stakes.history.view-mode";
+const DEFAULT_HISTORY_VIEW_MODE: HistoryViewMode = "minimal";
 const ALL_PERIODS_FILTER_VALUE = "__ALL_PERIODS__";
 
 const createSettlementLine = (localId: number): SettlementLineForm => ({
@@ -207,11 +208,11 @@ export const MatchStakesPage = () => {
   const [periodFilterOpen, setPeriodFilterOpen] = useState(false);
   const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(() => {
     if (typeof window === "undefined") {
-      return "minimal";
+      return DEFAULT_HISTORY_VIEW_MODE;
     }
 
     const saved = window.localStorage.getItem(HISTORY_VIEW_MODE_STORAGE_KEY);
-    return saved === "detail" ? "detail" : "minimal";
+    return saved === "detail" ? "detail" : DEFAULT_HISTORY_VIEW_MODE;
   });
 
   const [settlementOpen, setSettlementOpen] = useState(false);
@@ -408,6 +409,13 @@ export const MatchStakesPage = () => {
       label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
     }))
   ];
+  const hasNonDefaultFilters = Boolean(selectedPeriodId) || historyViewMode !== DEFAULT_HISTORY_VIEW_MODE;
+
+  const resetFiltersToDefault = () => {
+    setSelectedPeriodId(undefined);
+    setHistoryViewMode(DEFAULT_HISTORY_VIEW_MODE);
+    setPeriodFilterOpen(false);
+  };
 
   const openMatchDetail = (historyItem: DebtPeriodTimelineMatchDto, periodNo?: number | null) => {
     setSelectedMatchId(historyItem.matchId);
@@ -538,6 +546,9 @@ export const MatchStakesPage = () => {
         <Tooltip title="Filter Debt Period">
           <Button icon={<FilterOutlined />} onClick={() => setPeriodFilterOpen(true)} />
         </Tooltip>
+        <Button onClick={resetFiltersToDefault} disabled={!hasNonDefaultFilters}>
+          Reset filters
+        </Button>
       </div>
 
       {showDebtPeriodDetail ? (
@@ -865,6 +876,11 @@ export const MatchStakesPage = () => {
                   placeholder="Select debt period"
                   className="w-full"
                 />
+              </div>
+              <div className="flex justify-end">
+                <Button size="small" onClick={resetFiltersToDefault} disabled={!hasNonDefaultFilters}>
+                  Reset to default
+                </Button>
               </div>
               {selectedFilterPeriod ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600">
