@@ -262,14 +262,16 @@ export const RulesListPage = () => {
         title="Rules"
         subtitle="Manage business rules by module with builder-based Match Stakes summaries"
         actions={
-          <>
-            <Button type="primary" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/rules/new?module=MATCH_STAKES")}>
-              Create Match Stakes Rule
-            </Button>
-            <Button disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/rules/new?module=GROUP_FUND")}>
-              Create Group Fund Rule
-            </Button>
-          </>
+          canWriteActions ? (
+            <>
+              <Button type="primary" onClick={() => navigate("/rules/new?module=MATCH_STAKES")}>
+                Create Match Stakes Rule
+              </Button>
+              <Button onClick={() => navigate("/rules/new?module=GROUP_FUND")}>
+                Create Group Fund Rule
+              </Button>
+            </>
+          ) : null
         }
       />
 

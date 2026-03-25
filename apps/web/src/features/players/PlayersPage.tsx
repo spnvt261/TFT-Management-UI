@@ -57,9 +57,7 @@ export const PlayersPage = () => {
         title="Players"
         subtitle="Manage active members for match entry and rule resolution."
         actions={
-          <Button type="primary" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/players/new")}>
-            New Player
-          </Button>
+          canWriteActions ? <Button type="primary" onClick={() => navigate("/players/new")}>New Player</Button> : null
         }
       />
 
@@ -105,33 +103,34 @@ export const PlayersPage = () => {
 
                     <div className="text-xs text-slate-500">Slug: {player.slug ?? "-"}</div>
 
-                    <div className="flex gap-2">
-                      <Button block disabled={!canWriteActions} onClick={() => canWriteActions && navigate(`/players/${player.id}/edit`)}>
-                        Edit
-                      </Button>
-                      {player.isActive ? (
-                        <Button block danger disabled={!canWriteActions} onClick={() => canWriteActions && setTargetPlayer(player)}>
-                          Deactivate
+                    {canWriteActions ? (
+                      <div className="flex gap-2">
+                        <Button block onClick={() => navigate(`/players/${player.id}/edit`)}>
+                          Edit
                         </Button>
-                      ) : (
-                        <Button
-                          block
-                          type="primary"
-                          disabled={!canWriteActions}
-                          loading={reactivateMutation.isPending && targetPlayer?.id === player.id}
-                          onClick={async () => {
-                            if (!guardWritePermission(canWriteActions)) {
-                              return;
-                            }
-                            setTargetPlayer(player);
-                            await reactivateMutation.mutateAsync({ isActive: true });
-                            setTargetPlayer(null);
-                          }}
-                        >
-                          Reactivate
-                        </Button>
-                      )}
-                    </div>
+                        {player.isActive ? (
+                          <Button block danger onClick={() => setTargetPlayer(player)}>
+                            Deactivate
+                          </Button>
+                        ) : (
+                          <Button
+                            block
+                            type="primary"
+                            loading={reactivateMutation.isPending && targetPlayer?.id === player.id}
+                            onClick={async () => {
+                              if (!guardWritePermission(canWriteActions)) {
+                                return;
+                              }
+                              setTargetPlayer(player);
+                              await reactivateMutation.mutateAsync({ isActive: true });
+                              setTargetPlayer(null);
+                            }}
+                          >
+                            Reactivate
+                          </Button>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -151,11 +150,10 @@ export const PlayersPage = () => {
       </SectionCard>
 
       <ConfirmDanger
-        open={Boolean(targetPlayer?.isActive)}
+        open={Boolean(targetPlayer?.isActive) && canWriteActions}
         title="Deactivate player?"
         description={`This will mark ${targetPlayer?.displayName ?? "player"} as inactive and hide them from quick-entry choices.`}
         confirmText="Deactivate"
-        confirmDisabled={!canWriteActions}
         loading={deactivateMutation.isPending}
         onCancel={() => setTargetPlayer(null)}
         onConfirm={async () => {

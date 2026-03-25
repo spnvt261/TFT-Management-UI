@@ -55,6 +55,7 @@ export const RuleSetDetailPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { canWrite } = useAuth();
+  const canWriteActions = canWrite();
   const { ruleSetId } = useParams();
   const detailQuery = useRuleSetDetail(ruleSetId);
   const searchParams = new URLSearchParams(location.search);
@@ -161,14 +162,15 @@ export const RuleSetDetailPage = () => {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backTo)}>
             {backLabel}
           </Button>
-          <Button
-            type="primary"
-            icon={<EditOutlined />}
-            disabled={!canWrite()}
-            onClick={() => navigate(`/rules/${ruleSetId}/edit`)}
-          >
-            Edit rule
-          </Button>
+          {canWriteActions ? (
+            <Button
+              type="primary"
+              icon={<EditOutlined />}
+              onClick={() => navigate(`/rules/${ruleSetId}/edit`)}
+            >
+              Edit rule
+            </Button>
+          ) : null}
         </div>
       </header>
 

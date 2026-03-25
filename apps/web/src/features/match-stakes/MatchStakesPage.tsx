@@ -531,33 +531,27 @@ export const MatchStakesPage = () => {
         title="Match Stakes"
         subtitle="Simple debt notebook by period: current totals first, then match-by-match accumulation."
         actions={
-          <>
-            <Button type="primary" icon={<PlusOutlined />} disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/match-stakes/new")}>
-              Create match
-            </Button>
-            {hasOpenPeriod ? (
-              <Tooltip
-                title={
-                  !canWriteActions
-                    ? "Admin only."
-                    : canOpenClosePeriod
-                      ? "Close this period (requires confirmation in modal)."
-                      : "Need at least 1 match to close period."
-                }
-              >
-                <span>
-                  <Button onClick={openClosePeriodModal} disabled={!canOpenClosePeriod}>
-                    Close period
-                  </Button>
-                </span>
-              </Tooltip>
-            ) : null}
-            {!hasOpenPeriod ? (
-              <Button disabled={!canWriteActions} onClick={openCreatePeriodModal}>
-                New debt period
+          canWriteActions ? (
+            <>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
+                Create match
               </Button>
-            ) : null}
-          </>
+              {hasOpenPeriod ? (
+                <Tooltip title={canOpenClosePeriod ? "Close this period (requires confirmation in modal)." : "Need at least 1 match to close period."}>
+                  <span>
+                    <Button onClick={openClosePeriodModal} disabled={!canOpenClosePeriod}>
+                      Close period
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : null}
+              {!hasOpenPeriod ? (
+                <Button onClick={openCreatePeriodModal}>
+                  New debt period
+                </Button>
+              ) : null}
+            </>
+          ) : null
         }
       />
 
@@ -598,11 +592,7 @@ export const MatchStakesPage = () => {
                   type="info"
                   showIcon
                   message="No open debt period right now. You can still review historical periods below."
-                  action={
-                    <Button size="small" disabled={!canWriteActions} onClick={openCreatePeriodModal}>
-                      New debt period
-                    </Button>
-                  }
+                  action={canWriteActions ? <Button size="small" onClick={openCreatePeriodModal}>New debt period</Button> : null}
                 />
               ) : null}
 
@@ -1111,7 +1101,7 @@ export const MatchStakesPage = () => {
         title="Create new debt period"
         open={createPeriodOpen && canWriteActions}
         okText="Create period"
-        okButtonProps={{ loading: createPeriodMutation.isPending, disabled: !canWriteActions }}
+        okButtonProps={{ loading: createPeriodMutation.isPending }}
         onOk={async () => {
           if (!guardWritePermission(canWriteActions)) {
             return;
@@ -1151,7 +1141,7 @@ export const MatchStakesPage = () => {
         okText="Close period"
         okButtonProps={{
           loading: closePeriodMutation.isPending,
-          disabled: !canWriteActions || !closePeriodTargetId || !canConfirmClosePeriod
+          disabled: !closePeriodTargetId || !canConfirmClosePeriod
         }}
         onOk={async () => {
           if (!guardWritePermission(canWriteActions)) {
@@ -1197,7 +1187,6 @@ export const MatchStakesPage = () => {
               <div className="text-sm font-semibold text-slate-900">Init cua period moi (closingBalances)</div>
               <Button
                 size="small"
-                disabled={!canWriteActions}
                 onClick={() => {
                   setCloseBalanceDraft(
                     Object.fromEntries(closeBalancePlayers.map((player) => [player.playerId, 0]))
@@ -1218,7 +1207,6 @@ export const MatchStakesPage = () => {
                       value={player.draftNetVnd}
                       precision={0}
                       step={10000}
-                      disabled={!canWriteActions}
                       className="w-[170px]"
                       onChange={(value) =>
                         setCloseBalanceDraft((previous) => ({

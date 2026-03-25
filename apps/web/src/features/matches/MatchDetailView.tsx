@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DownOutlined, UpOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Descriptions, Tag, Typography } from "antd";
 import dayjs from "dayjs";
@@ -9,6 +9,9 @@ import { formatDateTime, formatVnd } from "@/lib/format";
 import { moduleLabels } from "@/lib/labels";
 
 type ParticipantViewMode = "simple" | "detail";
+const PARTICIPANT_VIEW_MODE_STORAGE_KEY = "tft2.match-detail.participant.view-mode";
+const RULE_DETAILS_OPEN_STORAGE_KEY = "tft2.match-detail.rule-details.open";
+const DEFAULT_PARTICIPANT_VIEW_MODE: ParticipantViewMode = "simple";
 
 interface MatchDetailViewProps {
   match: MatchDetailDto;
@@ -39,8 +42,21 @@ const getDebtToneClassName = (value: number) => {
 };
 
 export const MatchDetailView = ({ match, matchNo, periodNo, participantLedgerRows = [] }: MatchDetailViewProps) => {
-  const [participantViewMode, setParticipantViewMode] = useState<ParticipantViewMode>("simple");
-  const [ruleDetailsOpen, setRuleDetailsOpen] = useState(false);
+  const [participantViewMode, setParticipantViewMode] = useState<ParticipantViewMode>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_PARTICIPANT_VIEW_MODE;
+    }
+
+    const saved = window.localStorage.getItem(PARTICIPANT_VIEW_MODE_STORAGE_KEY);
+    return saved === "detail" ? "detail" : DEFAULT_PARTICIPANT_VIEW_MODE;
+  });
+  const [ruleDetailsOpen, setRuleDetailsOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(RULE_DETAILS_OPEN_STORAGE_KEY) === "true";
+  });
   const isGroupFundMatch = match.module === "GROUP_FUND";
   const ledgerAnchorIso = match.settlement?.postedToLedgerAt ?? match.playedAt;
   const beforeAnchorIso = dayjs(ledgerAnchorIso).subtract(1, "second").toISOString();
@@ -103,6 +119,18 @@ export const MatchDetailView = ({ match, matchNo, periodNo, participantLedgerRow
   const isFundSnapshotLoading =
     (groupFundSummaryBeforeQuery.isLoading || groupFundSummaryAfterQuery.isLoading) && !hasFundSnapshot;
   const isFundSnapshotUnavailable = !hasFundSnapshot && groupFundSummaryBeforeQuery.isError && groupFundSummaryAfterQuery.isError;
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(PARTICIPANT_VIEW_MODE_STORAGE_KEY, participantViewMode);
+    }
+  }, [participantViewMode]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(RULE_DETAILS_OPEN_STORAGE_KEY, String(ruleDetailsOpen));
+    }
+  }, [ruleDetailsOpen]);
 
   return (
     <div className="space-y-4">

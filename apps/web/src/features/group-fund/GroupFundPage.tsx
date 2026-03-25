@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppstoreOutlined, EyeInvisibleOutlined, EyeOutlined, FilterOutlined, PlusOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Alert, Button, DatePicker, Input, InputNumber, Modal, Pagination, Select, Skeleton, Tag, Tooltip, message } from "antd";
@@ -33,6 +33,8 @@ import type { GroupFundTransactionType } from "@/types/api";
 type HistoryViewMode = "minimal" | "detail";
 
 const DEFAULT_PAGE_SIZE = 12;
+const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.group-fund.history.view-mode";
+const DEFAULT_HISTORY_VIEW_MODE: HistoryViewMode = "minimal";
 
 const getObligationClassName = (value: number) => {
   if (value > 0) {
@@ -66,7 +68,14 @@ export const GroupFundPage = () => {
   const canWriteActions = canWrite();
   const [selectedMatchId, setSelectedMatchId] = useState<string>();
 
-  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>("minimal");
+  const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_HISTORY_VIEW_MODE;
+    }
+
+    const saved = window.localStorage.getItem(HISTORY_VIEW_MODE_STORAGE_KEY);
+    return saved === "detail" ? "detail" : DEFAULT_HISTORY_VIEW_MODE;
+  });
   const [showFundSnapshot, setShowFundSnapshot] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [from, setFrom] = useState<string>();
@@ -197,6 +206,12 @@ export const GroupFundPage = () => {
   const historyError = matchesQuery.error ?? ledgerQuery.error ?? transactionsQuery.error;
   const historyIsError = matchesQuery.isError || ledgerQuery.isError || transactionsQuery.isError;
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(HISTORY_VIEW_MODE_STORAGE_KEY, historyViewMode);
+    }
+  }, [historyViewMode]);
+
   return (
     <PageContainer>
       <AppBreadcrumb items={[{ label: "Group Fund" }]} />
@@ -205,19 +220,20 @@ export const GroupFundPage = () => {
         title="Group Fund"
         subtitle="Fund health overview: current obligations first, then detailed history."
         actions={
-          <>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              disabled={!canWriteActions}
-              onClick={() => canWriteActions && navigate("/group-fund/new")}
-            >
-              Create match
-            </Button>
-            <Button disabled={!canWriteActions} onClick={openTransactionModal}>
-              Manual transaction
-            </Button>
-          </>
+          canWriteActions ? (
+            <>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => navigate("/group-fund/new")}
+              >
+                Create match
+              </Button>
+              <Button onClick={openTransactionModal}>
+                Manual transaction
+              </Button>
+            </>
+          ) : null
         }
       />
 
@@ -330,9 +346,11 @@ export const GroupFundPage = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-900">Match History</div>
-                <Button size="small" type="link" disabled={!canWriteActions} onClick={() => canWriteActions && navigate("/group-fund/new")}>
-                  Create match
-                </Button>
+                {canWriteActions ? (
+                  <Button size="small" type="link" onClick={() => navigate("/group-fund/new")}>
+                    Create match
+                  </Button>
+                ) : null}
               </div>
 
               {matchesQuery.isLoading ? (
@@ -432,9 +450,11 @@ export const GroupFundPage = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-900">Manual Transactions</div>
-                <Button size="small" disabled={!canWriteActions} onClick={openTransactionModal}>
-                  Create transaction
-                </Button>
+                {canWriteActions ? (
+                  <Button size="small" onClick={openTransactionModal}>
+                    Create transaction
+                  </Button>
+                ) : null}
               </div>
 
               {transactionsQuery.isLoading ? (
@@ -633,7 +653,7 @@ export const GroupFundPage = () => {
             <Alert type="info" showIcon message="Player is optional for adjustment transaction types." />
           ) : null}
 
-          <Button type="primary" htmlType="submit" loading={createTransactionMutation.isPending} disabled={!canWriteActions}>
+          <Button type="primary" htmlType="submit" loading={createTransactionMutation.isPending}>
             Create transaction
           </Button>
         </form>

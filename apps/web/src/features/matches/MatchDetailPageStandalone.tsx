@@ -46,19 +46,21 @@ export const MatchDetailPageStandalone = () => {
         actions={
           <>
             <Button onClick={() => navigate(-1)}>Back</Button>
-            <Button
-              danger
-              disabled={detailQuery.data.status === "VOIDED" || !canWriteActions}
-              onClick={() => {
-                if (!guardWritePermission(canWriteActions)) {
-                  return;
-                }
+            {canWriteActions ? (
+              <Button
+                danger
+                disabled={detailQuery.data.status === "VOIDED"}
+                onClick={() => {
+                  if (!guardWritePermission(canWriteActions)) {
+                    return;
+                  }
 
-                setConfirmOpen(true);
-              }}
-            >
-              Void match
-            </Button>
+                  setConfirmOpen(true);
+                }}
+              >
+                Void match
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -68,7 +70,7 @@ export const MatchDetailPageStandalone = () => {
       <Modal
         title="Confirm void match"
         open={confirmOpen && canWriteActions}
-        okButtonProps={{ danger: true, loading: voidMutation.isPending, disabled: !canWriteActions || voidReason.trim().length < 3 }}
+        okButtonProps={{ danger: true, loading: voidMutation.isPending, disabled: voidReason.trim().length < 3 }}
         okText="Void"
         onOk={async () => {
           if (!guardWritePermission(canWriteActions)) {
