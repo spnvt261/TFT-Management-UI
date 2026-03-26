@@ -575,7 +575,7 @@ export const GroupFundCreatePage = () => {
 
     await createMutation.mutateAsync(payload);
     setConfirmCreateOpen(false);
-    navigate("/group-fund", { replace: true });
+    navigate("/group-fund/fund", { replace: true });
   };
 
   const handleCreateMatch = async () => {
@@ -601,12 +601,12 @@ export const GroupFundCreatePage = () => {
 
   return (
     <PageContainer>
-      <AppBreadcrumb items={[{ label: "Group Fund", to: "/group-fund" }, { label: "Create Match" }]} />
+      <AppBreadcrumb items={[{ label: "Group Fund", to: "/group-fund/fund" }, { label: "Create Match" }]} />
 
       <PageHeader
         title="Create Group Fund Match"
         subtitle="Select participants, preview module impact, optionally adjust participant nets, then create match."
-        actions={<Button onClick={() => navigate("/group-fund")}>Back to Group Fund</Button>}
+        actions={<Button onClick={() => navigate("/group-fund/fund")}>Back to Group Fund</Button>}
       />
 
       {formError ? (

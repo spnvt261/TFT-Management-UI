@@ -48,6 +48,7 @@ export const invalidateAfterGroupFundTransaction = async (queryClient: QueryClie
     queryClient.invalidateQueries({ queryKey: ["group-fund", "summary"] }),
     queryClient.invalidateQueries({ queryKey: ["group-fund", "ledger"] }),
     queryClient.invalidateQueries({ queryKey: ["group-fund", "transactions"] }),
+    queryClient.invalidateQueries({ queryKey: ["group-fund", "withdrawals"] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.overview })
   ]);
 };

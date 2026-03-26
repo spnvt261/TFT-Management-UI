@@ -2,7 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { groupFundApi } from "@/api/groupFundApi";
 import { queryKeys } from "@/api/queryKeys";
 import { invalidateAfterGroupFundTransaction } from "@/lib/invalidation";
-import type { GroupFundTransactionQuery, ModuleLedgerQuery, ModuleSummaryQuery } from "@/types/api";
+import type {
+  CreateGroupFundContributionRequest,
+  CreateGroupFundWithdrawalRequest,
+  GroupFundTransactionQuery,
+  ModuleLedgerQuery,
+  ModuleSummaryQuery
+} from "@/types/api";
 
 export const useGroupFundSummary = (query: ModuleSummaryQuery, enabled = true) =>
   useQuery({
@@ -28,6 +34,34 @@ export const useGroupFundTransactions = (query: GroupFundTransactionQuery) =>
     queryKey: queryKeys.groupFund.transactions(query),
     queryFn: () => groupFundApi.transactions(query)
   });
+
+export const useGroupFundWithdrawals = (query: Omit<GroupFundTransactionQuery, "transactionType">) =>
+  useQuery({
+    queryKey: queryKeys.groupFund.withdrawals(query),
+    queryFn: () => groupFundApi.withdrawals(query)
+  });
+
+export const useCreateGroupFundContribution = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateGroupFundContributionRequest) => groupFundApi.createContribution(payload),
+    onSuccess: async () => {
+      await invalidateAfterGroupFundTransaction(queryClient);
+    }
+  });
+};
+
+export const useCreateGroupFundWithdrawal = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateGroupFundWithdrawalRequest) => groupFundApi.createWithdrawal(payload),
+    onSuccess: async () => {
+      await invalidateAfterGroupFundTransaction(queryClient);
+    }
+  });
+};
 
 export const useCreateGroupFundTransaction = () => {
   const queryClient = useQueryClient();

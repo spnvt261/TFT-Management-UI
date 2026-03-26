@@ -47,11 +47,12 @@ export const router = createBrowserRouter([
           </RequireAdminRoute>
         )
       },
-      { path: "group-fund", element: <GroupFundRoute /> },
+      { path: "group-fund", element: <Navigate to="/group-fund/fund" replace /> },
+      { path: "group-fund/fund", element: <GroupFundRoute /> },
       {
         path: "group-fund/new",
         element: (
-          <RequireAdminRoute fallbackTo="/group-fund">
+          <RequireAdminRoute fallbackTo="/group-fund/fund">
             <GroupFundCreateRoute />
           </RequireAdminRoute>
         )

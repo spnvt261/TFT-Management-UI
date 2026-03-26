@@ -761,6 +761,8 @@ export interface GroupFundSummaryDto {
     playerName: string;
     totalContributedVnd: number;
     currentObligationVnd: number;
+    netObligationVnd: number;
+    prepaidVnd: number;
   }>;
   range: { from: string | null; to: string | null };
 }
@@ -783,6 +785,30 @@ export interface GroupFundLedgerItemDto {
 export interface CreateGroupFundTransactionRequest {
   transactionType: GroupFundTransactionType;
   playerId?: string | null;
+  amountVnd: number;
+  reason: string;
+  postedAt?: string;
+}
+
+export interface CreateGroupFundContributionRequest {
+  playerId: string;
+  amountVnd: number;
+  note?: string | null;
+  postedAt?: string;
+}
+
+export interface CreateGroupFundContributionResultDto {
+  batchId: string;
+  postedAt: string;
+  playerId: string;
+  playerName: string;
+  amountVnd: number;
+  note: string | null;
+}
+
+export interface CreateGroupFundWithdrawalRequest {
+  transactionType: "WITHDRAWAL";
+  playerId: string;
   amountVnd: number;
   reason: string;
   postedAt?: string;

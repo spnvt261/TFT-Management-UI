@@ -36,6 +36,7 @@ export const queryKeys = {
     summary: (query: unknown) => ["group-fund", "summary", query] as const,
     ledger: (query: unknown) => ["group-fund", "ledger", query] as const,
     matches: (query: unknown) => ["group-fund", "matches", query] as const,
-    transactions: (query: unknown) => ["group-fund", "transactions", query] as const
+    transactions: (query: unknown) => ["group-fund", "transactions", query] as const,
+    withdrawals: (query: unknown) => ["group-fund", "withdrawals", query] as const
   }
 };
