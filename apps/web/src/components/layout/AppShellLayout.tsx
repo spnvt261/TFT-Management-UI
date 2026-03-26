@@ -5,9 +5,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@/lib/cn";
 
 const navItems = [
-  { to: "/dashboard", label: "Dashboard" },
   { to: "/match-stakes", label: "Match Stakes" },
-  { to: "/group-fund", label: "Group Fund" },
   { to: "/rules", label: "Rules" },
   { to: "/players", label: "Players" },
   { to: "/settings", label: "Settings" }
