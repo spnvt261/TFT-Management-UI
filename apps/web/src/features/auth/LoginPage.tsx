@@ -35,7 +35,7 @@ export const LoginPage = () => {
       return queryFrom;
     }
 
-    return "/dashboard";
+    return "/match-stakes";
   }, [location.state, searchParams]);
 
   if (isAuthenticated) {

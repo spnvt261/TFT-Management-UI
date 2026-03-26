@@ -36,7 +36,7 @@ export const router = createBrowserRouter([
     ),
     errorElement: <RouteErrorBoundary />,
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { index: true, element: <Navigate to="/match-stakes" replace /> },
       { path: "dashboard", element: <DashboardRoute /> },
       { path: "match-stakes", element: <MatchStakesRoute /> },
       {
