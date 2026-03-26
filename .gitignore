@@ -6,7 +6,7 @@ coverage
 .DS_Store
 *.log
 promt
-# .env.*
+.env.*
 .env
 apps/web/.env
 .vercel
