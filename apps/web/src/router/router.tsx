@@ -18,6 +18,7 @@ import PlayersRoute from "@/pages/PlayersRoute";
 import PlayerCreateRoute from "@/pages/PlayerCreateRoute";
 import PlayerEditRoute from "@/pages/PlayerEditRoute";
 import MatchDetailRoute from "@/pages/MatchDetailRoute";
+import SettingsRoute from "@/pages/SettingsRoute";
 import NotFoundRoute from "@/pages/NotFoundRoute";
 import LoginRoute from "@/pages/LoginRoute";
 
@@ -108,6 +109,7 @@ export const router = createBrowserRouter([
         )
       },
       { path: "matches/:matchId", element: <MatchDetailRoute /> },
+      { path: "settings", element: <SettingsRoute /> },
       { path: "not-found", element: <NotFoundRoute /> },
       { path: "*", element: <NotFoundRoute /> }
     ]

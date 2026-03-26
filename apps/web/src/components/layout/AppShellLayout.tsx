@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { Drawer, Button } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@/lib/cn";
-import { useAuth } from "@/features/auth/AuthContext";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/match-stakes", label: "Match Stakes" },
   { to: "/group-fund", label: "Group Fund" },
   { to: "/rules", label: "Rules" },
-  { to: "/players", label: "Players" }
+  { to: "/players", label: "Players" },
+  { to: "/settings", label: "Settings" }
 ];
 
 const NavContent = ({ onNavigate }: { onNavigate?: () => void }) => {
@@ -43,39 +43,20 @@ const NavContent = ({ onNavigate }: { onNavigate?: () => void }) => {
 
 export const AppShellLayout = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const navigate = useNavigate();
-  const { role, logout } = useAuth();
-
-  const handleLogout = () => {
-    logout();
-    navigate("/login", { replace: true });
-  };
 
   return (
     <div className="min-h-screen bg-transparent lg:flex">
       <aside className="sticky top-0 hidden h-screen w-[280px] border-r border-slate-200/80 bg-white/90 px-5 py-6 backdrop-blur lg:block">
         <div className="mb-6 border-b border-slate-200/80 pb-5">
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-700">TFT2</div>
-          <h1 className="mt-2 text-xl font-bold tracking-tight text-slate-900">History Manager</h1>
-          <div className="mt-3 flex items-center justify-between">
-            <div className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">{role ?? "-"}</div>
-            <Button size="small" onClick={handleLogout}>
-              Logout
-            </Button>
-          </div>
         </div>
         <NavContent />
       </aside>
 
       <div className="min-w-0 flex-1 px-3 pb-8 pt-3 sm:px-4 sm:pt-4 lg:px-7 lg:pt-6 xl:px-8">
         <header className="mb-4 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 backdrop-blur lg:hidden">
-          <h1 className="text-base font-semibold">TFT History ({role ?? "-"})</h1>
-          <div className="flex items-center gap-2">
-            <Button aria-label="Open navigation" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />
-            <Button size="small" onClick={handleLogout}>
-              Logout
-            </Button>
-          </div>
+          <h1 className="text-base font-semibold">TFT History</h1>
+          <Button aria-label="Open navigation" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />
         </header>
 
         <main className="w-full pb-20 lg:pb-10">
