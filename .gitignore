@@ -7,3 +7,6 @@ coverage
 *.log
 promt
 # .env.*
+.env
+apps/web/.env
+.vercel
