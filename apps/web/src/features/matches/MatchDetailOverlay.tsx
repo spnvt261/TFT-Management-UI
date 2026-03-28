@@ -1,9 +1,9 @@
 import { CloseOutlined } from "@ant-design/icons";
 import { Button, Drawer } from "antd";
-import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import { useMatchDetail } from "@/features/matches/hooks";
 import { MatchDetailView } from "@/features/matches/MatchDetailView";
+import { MatchDetailLoading } from "@/features/matches/MatchDetailLoading";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { toAppError } from "@/api/httpClient";
 import { getErrorMessage } from "@/lib/error-messages";
@@ -34,7 +34,7 @@ export const MatchDetailOverlay = ({ matchId, open, onClose, matchStakesContext 
   const matchQuery = useMatchDetail(matchId);
 
   const content = matchQuery.isLoading ? (
-    <PageLoading label="Loading match detail..." />
+    <MatchDetailLoading compact />
   ) : matchQuery.isError ? (
     <ErrorState description={getErrorMessage(toAppError(matchQuery.error))} onRetry={() => void matchQuery.refetch()} />
   ) : matchQuery.data ? (

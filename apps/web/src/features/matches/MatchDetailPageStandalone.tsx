@@ -5,10 +5,10 @@ import { useMatchDetail, useVoidMatch } from "@/features/matches/hooks";
 import { useAuth } from "@/features/auth/AuthContext";
 import { guardWritePermission } from "@/features/auth/permissions";
 import { MatchDetailView } from "@/features/matches/MatchDetailView";
+import { MatchDetailLoading } from "@/features/matches/MatchDetailLoading";
 import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { PageLoading } from "@/components/states/PageLoading";
 import { ErrorState } from "@/components/states/ErrorState";
 import { getErrorMessage } from "@/lib/error-messages";
 import { toAppError } from "@/api/httpClient";
@@ -29,7 +29,17 @@ export const MatchDetailPageStandalone = () => {
   }
 
   if (detailQuery.isLoading) {
-    return <PageLoading label="Loading match detail..." />;
+    return (
+      <PageContainer>
+        <AppBreadcrumb items={[{ label: "Match Detail" }]} />
+        <PageHeader
+          title="Match Detail"
+          subtitle="Review participants, transfers, and match status."
+          actions={<Button onClick={() => navigate(-1)}>Back</Button>}
+        />
+        <MatchDetailLoading />
+      </PageContainer>
+    );
   }
 
   if (detailQuery.isError || !detailQuery.data) {
