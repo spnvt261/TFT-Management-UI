@@ -182,6 +182,10 @@ type AdvanceDetailRow = {
   afterVnd: number | null;
 };
 
+type AdvanceRenderRow = AdvanceDetailRow & {
+  isPlaceholder?: boolean;
+};
+
 const isAdvanceDetailRow = (row: {
   playerId: string | null;
   playerName: string;
@@ -378,6 +382,116 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
   ];
 };
 
+type AdvancePlayerSlot = {
+  playerId: string | null;
+  playerName: string;
+};
+
+const buildAdvancePlayerSlots = (items: MatchStakesHistoryFeedItem[]): AdvancePlayerSlot[] => {
+  const byKey = new Map<string, AdvancePlayerSlot>();
+
+  const upsert = (playerId: string | null | undefined, playerName: string | null | undefined) => {
+    const normalizedName = toOptionalString(playerName);
+    if (!normalizedName) {
+      return;
+    }
+
+    const normalizedId = toOptionalString(playerId);
+    const key = normalizedId ?? `name:${normalizedName.toLowerCase()}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        playerId: normalizedId ?? null,
+        playerName: normalizedName
+      });
+    }
+  };
+
+  for (const item of items) {
+    for (const row of item.matchRows ?? []) {
+      upsert(row.playerId, row.playerName);
+    }
+
+    for (const impact of item.playerImpacts ?? []) {
+      upsert(impact.playerId, impact.playerName);
+    }
+
+    upsert(item.playerId, item.playerName);
+  }
+
+  const slots = Array.from(byKey.values());
+  slots.sort((left, right) => left.playerName.localeCompare(right.playerName));
+  return slots;
+};
+
+const alignAdvanceRowsWithSlots = (rows: AdvanceDetailRow[], slots: AdvancePlayerSlot[]): AdvanceRenderRow[] => {
+  if (slots.length === 0) {
+    return rows;
+  }
+
+  const byId = new Map<string, AdvanceDetailRow>();
+  const byName = new Map<string, AdvanceDetailRow[]>();
+  for (const row of rows) {
+    if (row.playerId) {
+      byId.set(row.playerId, row);
+    }
+
+    const normalizedName = row.playerName.toLowerCase();
+    const sameNameRows = byName.get(normalizedName) ?? [];
+    sameNameRows.push(row);
+    byName.set(normalizedName, sameNameRows);
+  }
+
+  const consumedRows = new Set<AdvanceDetailRow>();
+  const takeByName = (name: string) => {
+    const candidates = byName.get(name.toLowerCase()) ?? [];
+    for (const candidate of candidates) {
+      if (!consumedRows.has(candidate)) {
+        consumedRows.add(candidate);
+        return candidate;
+      }
+    }
+
+    return null;
+  };
+
+  const aligned: AdvanceRenderRow[] = slots.map((slot) => {
+    let matched: AdvanceDetailRow | null = null;
+    if (slot.playerId) {
+      const matchedById = byId.get(slot.playerId);
+      if (matchedById && !consumedRows.has(matchedById)) {
+        consumedRows.add(matchedById);
+        matched = matchedById;
+      }
+    }
+
+    if (!matched) {
+      matched = takeByName(slot.playerName);
+    }
+
+    if (matched) {
+      return matched;
+    }
+
+    return {
+      playerId: slot.playerId,
+      playerName: slot.playerName,
+      deltaVnd: 0,
+      beforeVnd: null,
+      afterVnd: null,
+      isPlaceholder: true
+    };
+  });
+
+  // Keep any extra rows that are not present in canonical slots.
+  for (const row of rows) {
+    if (!consumedRows.has(row)) {
+      aligned.push(row);
+    }
+  }
+
+  return aligned;
+};
+
 const toResetLabel = (item: MatchStakesHistoryFeedItem) => {
   if (item.eventStatus !== "RESET") {
     return null;
@@ -432,6 +546,8 @@ export const MatchStakesHistoryFeed = ({
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
 
+  const advancePlayerSlots = buildAdvancePlayerSlots(items);
+
   return (
     <div className="flex flex-wrap gap-2.5">
       {items.map((item) => {
@@ -441,7 +557,9 @@ export const MatchStakesHistoryFeed = ({
         const hasMatchRows = itemType === "MATCH" && Array.isArray(item.matchRows) && item.matchRows.length > 0;
         const sortedMatchRows = hasMatchRows ? sortMatchRows(item.matchRows ?? []) : [];
         const advanceNoteTag = itemType === "ADVANCE" ? item.note?.trim() ?? null : null;
-        const advanceDetailRows = itemType === "ADVANCE" ? buildAdvanceDetailRows(item) : [];
+        const rawAdvanceDetailRows = itemType === "ADVANCE" ? buildAdvanceDetailRows(item) : [];
+        const advanceDetailRows =
+          itemType === "ADVANCE" ? alignAdvanceRowsWithSlots(rawAdvanceDetailRows, advancePlayerSlots) : [];
         const resetLabel = itemType === "ADVANCE" ? toResetLabel(item) : null;
         const canResetAdvance = itemType === "ADVANCE" && item.eventStatus === "ACTIVE" && !!onRequestResetAdvance;
         const advanceHeadlineLabel =
@@ -579,19 +697,23 @@ export const MatchStakesHistoryFeed = ({
             {itemType === "ADVANCE" ? (
               <div className="mt-2 space-y-1.5 text-[11px] text-slate-500">
                 {advanceDetailRows.map((row, index) => {
+                  const isPlaceholder = Boolean(row.isPlaceholder);
                   const afterVnd = row.afterVnd ?? row.deltaVnd;
                   const beforeVnd = row.beforeVnd ?? (afterVnd - row.deltaVnd);
                   const isCombinedMode = debtViewMode === "combined";
                   const headlineVnd = isCombinedMode ? afterVnd : row.deltaVnd;
                   return (
-                    <div key={`${item.id}-advance-${row.playerId ?? index}`} className="rounded-md border border-slate-200 bg-slate-50/80 px-2.5 py-1.5">
+                    <div
+                      key={`${item.id}-advance-${row.playerId ?? index}`}
+                      className={`rounded-md border px-2.5 py-1.5 ${isPlaceholder ? "border-gray-300 bg-gray-200" : "border-slate-200 bg-slate-50/80"}`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 text-xs font-medium text-slate-800">{row.playerName}</div>
                         <div className={`text-sm font-semibold ${getAmountClassName(headlineVnd)}`}>
                           {formatSignedAmount(headlineVnd)}
                         </div>
                       </div>
-                      {viewMode === "detail" && isCombinedMode ? (
+                      {viewMode === "detail" ? (
                         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
                           <span className={getAmountClassName(row.deltaVnd)}>{`Advance: ${formatSignedAmount(row.deltaVnd)}`}</span>
                           <span>{`Before: ${formatSignedAmount(beforeVnd)}`}</span>
