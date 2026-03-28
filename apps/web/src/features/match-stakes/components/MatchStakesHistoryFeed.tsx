@@ -12,7 +12,7 @@ export interface MatchStakesHistoryFeedItem extends MatchStakesHistoryItemDto {
 interface MatchStakesHistoryFeedProps {
   items: MatchStakesHistoryFeedItem[];
   viewMode: MatchStakesHistoryViewMode;
-  debtViewMode?: "match-only" | "after-advance";
+  debtViewMode?: "match-only" | "advance-only" | "combined";
   onOpenMatch: (item: MatchStakesHistoryFeedItem) => void;
   onRequestResetAdvance?: (item: MatchStakesHistoryFeedItem) => void;
   resettingEventId?: string | null;
@@ -77,8 +77,31 @@ const sortMatchRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
+const toOptionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const toStringArray = (value: unknown) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return 0;
+};
+
+const getMatchRowDelta = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.matchDeltaVnd, row.matchNetVnd);
+const getAdvanceRowDelta = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.advanceDeltaVnd, 0);
+const getCombinedRowDelta = (row: DebtPeriodTimelinePlayerRowDto) =>
+  getFirstFiniteNumber(row.combinedDeltaVnd, row.matchNetVnd, getMatchRowDelta(row) + getAdvanceRowDelta(row));
+const getMatchRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.cumulativeMatchNetVnd, row.cumulativeNetVnd);
+const getAdvanceRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.cumulativeAdvanceNetVnd, 0);
+const getCombinedRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) =>
+  getFirstFiniteNumber(
+    row.cumulativeCombinedNetVnd,
+    row.cumulativeNetVnd,
+    getMatchRowCumulative(row) + getAdvanceRowCumulative(row)
+  );
 
 const normalizeHistoryItemType = (item: MatchStakesHistoryFeedItem) => {
   const rawType = typeof item.itemType === "string" ? item.itemType.toUpperCase() : "";
@@ -131,30 +154,22 @@ const resolvePlayerImpactDelta = (impact: NonNullable<MatchStakesHistoryItemDto[
   return null;
 };
 
-const getMatchRowDebtSnapshot = (item: MatchStakesHistoryFeedItem, row: DebtPeriodTimelinePlayerRowDto, debtViewMode: "match-only" | "after-advance") => {
-  const fallbackAfterVnd = row.cumulativeNetVnd;
-  const fallbackBeforeVnd = row.cumulativeNetVnd - row.matchNetVnd;
-
-  if (debtViewMode !== "after-advance" || !Array.isArray(item.playerImpacts) || item.playerImpacts.length === 0) {
-    return {
-      beforeVnd: fallbackBeforeVnd,
-      afterVnd: fallbackAfterVnd
-    };
-  }
-
-  const playerImpact = item.playerImpacts.find((impact) => impact.playerId === row.playerId);
-  if (!playerImpact) {
-    return {
-      beforeVnd: fallbackBeforeVnd,
-      afterVnd: fallbackAfterVnd
-    };
-  }
-
-  const beforeVnd = typeof playerImpact.debtBeforeVnd === "number" ? playerImpact.debtBeforeVnd : fallbackBeforeVnd;
-  const afterVnd = typeof playerImpact.debtAfterVnd === "number" ? playerImpact.debtAfterVnd : fallbackAfterVnd;
+const getMatchRowDebtSnapshot = (
+  row: DebtPeriodTimelinePlayerRowDto,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+) => {
+  const deltaVnd =
+    debtViewMode === "match-only" ? getMatchRowDelta(row) : debtViewMode === "advance-only" ? getAdvanceRowDelta(row) : getCombinedRowDelta(row);
+  const afterVnd =
+    debtViewMode === "match-only"
+      ? getMatchRowCumulative(row)
+      : debtViewMode === "advance-only"
+        ? getAdvanceRowCumulative(row)
+        : getCombinedRowCumulative(row);
 
   return {
-    beforeVnd,
+    deltaVnd,
+    beforeVnd: afterVnd - deltaVnd,
     afterVnd
   };
 };
@@ -169,6 +184,63 @@ const isAdvanceDetailRow = (row: { playerId: string | null; playerName: string; 
   typeof row.deltaVnd === "number";
 
 const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetailRow[] => {
+  const playerNameById = new Map<string, string>();
+  for (const impact of item.playerImpacts ?? []) {
+    const playerId = toOptionalString(impact.playerId);
+    const playerName = toOptionalString(impact.playerName);
+    if (playerId && playerName) {
+      playerNameById.set(playerId, playerName);
+    }
+  }
+
+  for (const row of item.matchRows ?? []) {
+    if (row.playerId && row.playerName) {
+      playerNameById.set(row.playerId, row.playerName);
+    }
+  }
+
+  const metadataDetails = getAdvanceMetadataDetails(item);
+  const metadataImpactLines = Array.isArray(metadataDetails?.["impactLines"]) ? metadataDetails["impactLines"] : [];
+  const topLevelImpactLines = Array.isArray(item.impactLines) ? item.impactLines : [];
+  const impactLines = topLevelImpactLines.length > 0 ? topLevelImpactLines : metadataImpactLines;
+  const rowsFromImpactLines: AdvanceDetailRow[] = [];
+
+  for (const impactLine of impactLines) {
+    if (!isRecord(impactLine)) {
+      continue;
+    }
+
+    const playerId = toOptionalString(impactLine["playerId"]);
+    const playerName =
+      toOptionalString(impactLine["playerName"]) ?? (playerId ? playerNameById.get(playerId) ?? null : null) ?? "Player";
+    const deltaVnd =
+      toOptionalNumber(impactLine["netDeltaVnd"]) ??
+      (() => {
+        const beforeVnd = toOptionalNumber(impactLine["debtBeforeVnd"]);
+        const afterVnd = toOptionalNumber(impactLine["debtAfterVnd"]);
+        if (beforeVnd === null || afterVnd === null) {
+          return null;
+        }
+        return afterVnd - beforeVnd;
+      })();
+
+    const candidate = {
+      playerId,
+      playerName,
+      deltaVnd
+    };
+
+    if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
+      continue;
+    }
+
+    rowsFromImpactLines.push(candidate);
+  }
+
+  if (rowsFromImpactLines.length > 0) {
+    return rowsFromImpactLines;
+  }
+
   const rowsFromPlayerImpacts: AdvanceDetailRow[] = [];
   for (const impact of item.playerImpacts ?? []) {
     const candidate = {
@@ -193,11 +265,11 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
   }
 
   return item.matchRows
-    .filter((row) => row.matchNetVnd !== 0)
+    .filter((row) => getCombinedRowDelta(row) !== 0)
     .map((row) => ({
       playerId: row.playerId,
       playerName: row.playerName,
-      deltaVnd: row.matchNetVnd
+      deltaVnd: getCombinedRowDelta(row)
     }));
 };
 
@@ -229,7 +301,7 @@ const resolveAdvanceParticipantSummary = (item: MatchStakesHistoryFeedItem) => {
   }
 
   const metadataDetails = getAdvanceMetadataDetails(item);
-  const impactLines = metadataDetails?.["impactLines"];
+  const impactLines = Array.isArray(item.impactLines) && item.impactLines.length > 0 ? item.impactLines : metadataDetails?.["impactLines"];
   if (Array.isArray(impactLines)) {
     for (const line of impactLines) {
       if (!isRecord(line)) {
@@ -277,10 +349,22 @@ const toResetLabel = (item: MatchStakesHistoryFeedItem) => {
   return "Reset";
 };
 
+const getRowDeltaLabel = (debtViewMode: "match-only" | "advance-only" | "combined") => {
+  if (debtViewMode === "match-only") {
+    return "Match";
+  }
+
+  if (debtViewMode === "advance-only") {
+    return "Advance";
+  }
+
+  return "Combined";
+};
+
 export const MatchStakesHistoryFeed = ({
   items,
   viewMode,
-  debtViewMode = "match-only",
+  debtViewMode = "combined",
   onOpenMatch,
   onRequestResetAdvance,
   resettingEventId,
@@ -405,9 +489,11 @@ export const MatchStakesHistoryFeed = ({
             {hasMatchRows ? (
               <div className="mt-2 space-y-1.5">
                 {sortedMatchRows.map((row) => {
-                  const debtSnapshot = getMatchRowDebtSnapshot(item, row, debtViewMode);
+                  const debtSnapshot = getMatchRowDebtSnapshot(row, debtViewMode);
                   const debtAfterVnd = debtSnapshot.afterVnd;
                   const debtBeforeVnd = debtSnapshot.beforeVnd;
+                  const debtDeltaVnd = debtSnapshot.deltaVnd;
+                  const debtDeltaLabel = getRowDeltaLabel(debtViewMode);
 
                   return (
                     <div key={`${item.id}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
@@ -420,8 +506,8 @@ export const MatchStakesHistoryFeed = ({
                       {viewMode === "detail" ? (
                         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
                           <span className={getPlacementClassName(row)}>{getPlacementLabel(row)}</span>
-                          <span className={getAmountClassName(row.matchNetVnd)}>{`Match: ${formatSignedAmount(row.matchNetVnd)}`}</span>
-                          <span>{`Before match: ${formatSignedAmount(debtBeforeVnd)}`}</span>
+                          <span className={getAmountClassName(debtDeltaVnd)}>{`${debtDeltaLabel}: ${formatSignedAmount(debtDeltaVnd)}`}</span>
+                          <span>{`Before: ${formatSignedAmount(debtBeforeVnd)}`}</span>
                         </div>
                       ) : null}
                     </div>

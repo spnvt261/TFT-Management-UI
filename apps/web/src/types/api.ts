@@ -572,15 +572,31 @@ export interface DebtPeriodPlayerSummaryDto {
   playerName: string;
   totalMatches: number;
   initNetVnd?: number;
+  accruedMatchNetVnd?: number;
+  accruedAdvanceNetVnd?: number;
+  accruedCombinedNetVnd?: number;
+  matchNetVnd?: number;
+  advanceNetVnd?: number;
+  combinedNetVnd?: number;
   accruedNetVnd: number;
   settledPaidVnd: number;
   settledReceivedVnd: number;
+  outstandingCombinedNetVnd?: number;
   outstandingNetVnd: number;
 }
 
 export interface DebtPeriodSummaryDto {
   totalMatches: number;
   totalPlayers: number;
+  totalMatchNetReceiveVnd?: number;
+  totalMatchNetPayVnd?: number;
+  totalAdvanceNetReceiveVnd?: number;
+  totalAdvanceNetPayVnd?: number;
+  totalCombinedNetReceiveVnd?: number;
+  totalCombinedNetPayVnd?: number;
+  totalOutstandingCombinedReceiveVnd?: number;
+  totalOutstandingCombinedPayVnd?: number;
+  initialBalanceDecomposition?: "COMBINED_ONLY";
   totalOutstandingReceiveVnd: number;
   totalOutstandingPayVnd: number;
 }
@@ -638,10 +654,19 @@ export interface DebtPeriodTimelinePlayerRowDto {
   playerName: string;
   tftPlacement: number | null;
   relativeRank: number | null;
+  matchDeltaVnd?: number;
+  advanceDeltaVnd?: number;
+  combinedDeltaVnd?: number;
+  cumulativeMatchNetVnd?: number;
+  cumulativeAdvanceNetVnd?: number;
+  cumulativeCombinedNetVnd?: number;
   matchNetVnd: number;
   cumulativeNetVnd: number;
   placementLabel?: string | null;
 }
+
+export type MatchStakesDebtImpactBucket = "MATCH" | "ADVANCE";
+export type MatchStakesInitialBalanceDecomposition = "COMBINED_ONLY";
 
 export interface DebtPeriodTimelineItemDto {
   type: "MATCH" | "INITIAL" | "ADVANCE" | "NOTE";
@@ -656,9 +681,15 @@ export interface DebtPeriodTimelineItemDto {
   note?: string | null;
   affectsDebt?: boolean | null;
   impactMode?: MatchStakesHistoryImpactMode | null;
+  debtImpactBucket?: MatchStakesDebtImpactBucket | null;
+  debtImpactActive?: boolean | null;
+  initialBalanceDecomposition?: MatchStakesInitialBalanceDecomposition | null;
   eventStatus?: MatchStakesHistoryEventStatus | null;
   resetAt?: string | null;
   resetReason?: string | null;
+  impactLines?: MatchStakesHistoryImpactLineDto[] | null;
+  advancerPlayerId?: string | null;
+  participantPlayerIds?: string[] | null;
   metadata?: MatchStakesHistoryMetadataDto | null;
   rows: DebtPeriodTimelinePlayerRowDto[];
 }
@@ -686,11 +717,15 @@ export interface DebtPeriodTimelineEventDto {
   reason?: string | null;
   impactMode?: MatchStakesHistoryImpactMode | null;
   affectsDebt?: boolean | null;
+  debtImpactBucket?: MatchStakesDebtImpactBucket | null;
+  debtImpactActive?: boolean | null;
+  initialBalanceDecomposition?: MatchStakesInitialBalanceDecomposition | null;
   eventStatus?: MatchStakesHistoryEventStatus | null;
   resetAt?: string | null;
   resetReason?: string | null;
   advancerPlayerId?: string | null;
   participantPlayerIds?: string[];
+  impactLines?: MatchStakesHistoryImpactLineDto[] | null;
   balanceBeforeVnd?: number | null;
   balanceAfterVnd?: number | null;
   rows?: DebtPeriodTimelinePlayerRowDto[];
@@ -723,6 +758,7 @@ export type MatchStakesHistoryEventStatus = "ACTIVE" | "RESET";
 export interface MatchStakesHistoryImpactLineDto {
   playerId?: string | null;
   playerName?: string | null;
+  allocatedShareVnd?: number | null;
   netDeltaVnd?: number | null;
   debtBeforeVnd?: number | null;
   debtAfterVnd?: number | null;
@@ -737,7 +773,12 @@ export interface MatchStakesHistoryMetadataDto {
     impactLines?: MatchStakesHistoryImpactLineDto[];
     impactMode?: MatchStakesHistoryImpactMode | null;
     affectsDebt?: boolean | null;
+    debtImpactBucket?: MatchStakesDebtImpactBucket | null;
+    debtImpactActive?: boolean | null;
     eventType?: string | null;
+    eventStatus?: MatchStakesHistoryEventStatus | null;
+    resetAt?: string | null;
+    resetReason?: string | null;
     [key: string]: unknown;
   } | null;
   advancerPlayerId?: string | null;
@@ -746,6 +787,8 @@ export interface MatchStakesHistoryMetadataDto {
   impactLines?: MatchStakesHistoryImpactLineDto[];
   impactMode?: MatchStakesHistoryImpactMode | null;
   affectsDebt?: boolean | null;
+  debtImpactBucket?: MatchStakesDebtImpactBucket | null;
+  debtImpactActive?: boolean | null;
   eventType?: string | null;
   [key: string]: unknown;
 }
@@ -788,8 +831,11 @@ export interface MatchStakesHistoryItemDto {
   reason?: string | null;
   advancerPlayerId?: string | null;
   participantPlayerIds?: string[];
+  impactLines?: MatchStakesHistoryImpactLineDto[] | null;
   impactMode?: MatchStakesHistoryImpactMode | null;
   affectsDebt?: boolean | null;
+  debtImpactBucket?: MatchStakesDebtImpactBucket | null;
+  debtImpactActive?: boolean | null;
   debtImpactVnd?: number | null;
   balanceBeforeVnd?: number | null;
   balanceAfterVnd?: number | null;
@@ -808,7 +854,8 @@ export interface MatchStakesHistoryQuery {
 
 export interface CreateMatchStakesHistoryEventRequest {
   periodId?: string | null;
-  eventType: Exclude<MatchStakesHistoryEventType, "MATCH">;
+  debtPeriodId?: string | null;
+  eventType: "MATCH_STAKES_ADVANCE" | "MATCH_STAKES_NOTE" | Exclude<MatchStakesHistoryEventType, "MATCH">;
   playerId?: string | null;
   participantPlayerIds?: string[] | null;
   beneficiaryPlayerIds?: string[] | null;

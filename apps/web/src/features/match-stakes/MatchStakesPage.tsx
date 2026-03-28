@@ -61,12 +61,15 @@ type SettlementLineForm = {
   note: string;
 };
 
-type CurrentDebtViewMode = "after-advance" | "match-only";
+type CurrentDebtViewMode = "match-only" | "advance-only" | "combined";
 type HistoryViewMode = "minimal" | "detail";
 type CloseBalanceDraft = Record<string, number>;
 type CurrentDebtDisplayPlayer = DebtPeriodPlayerSummaryDto & {
   displayOutstandingVnd: number;
-  matchOnlyNetFromMatchesVnd: number;
+  matchBucketNetVnd: number;
+  advanceBucketNetVnd: number;
+  combinedBucketNetVnd: number;
+  outstandingCombinedBucketNetVnd: number;
 };
 
 const CURRENT_DEBT_VIEW_MODE_STORAGE_KEY = "tft2.matchStakes.currentDebtViewMode";
@@ -131,7 +134,47 @@ const sortByNetAmount = <T extends { playerName: string }>(items: T[], getAmount
   return next;
 };
 
-const sortOutstandingPlayers = (players: DebtPeriodPlayerSummaryDto[]) => sortByNetAmount(players, (player) => player.outstandingNetVnd);
+const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return 0;
+};
+
+const resolveMatchBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
+  getFirstFiniteNumber(player.matchNetVnd, player.accruedMatchNetVnd, player.accruedNetVnd);
+
+const resolveAdvanceBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
+  getFirstFiniteNumber(player.advanceNetVnd, player.accruedAdvanceNetVnd, 0);
+
+const resolveCombinedBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
+  getFirstFiniteNumber(
+    player.combinedNetVnd,
+    player.accruedCombinedNetVnd,
+    resolveMatchBucketNetVnd(player) + resolveAdvanceBucketNetVnd(player),
+    player.accruedNetVnd
+  );
+
+const resolveOutstandingCombinedBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
+  getFirstFiniteNumber(player.outstandingCombinedNetVnd, player.outstandingNetVnd, resolveCombinedBucketNetVnd(player));
+
+const getDebtValueByMode = (player: DebtPeriodPlayerSummaryDto, mode: CurrentDebtViewMode) => {
+  if (mode === "match-only") {
+    return resolveMatchBucketNetVnd(player);
+  }
+
+  if (mode === "advance-only") {
+    return resolveAdvanceBucketNetVnd(player);
+  }
+
+  return resolveOutstandingCombinedBucketNetVnd(player);
+};
+
+const sortOutstandingPlayers = (players: DebtPeriodPlayerSummaryDto[]) =>
+  sortByNetAmount(players, (player) => resolveOutstandingCombinedBucketNetVnd(player));
 
 const sortTimelineRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
   const next = [...rows];
@@ -283,8 +326,11 @@ const mapTimelineEventsToHistoryItems = (
     reason: eventItem.reason ?? null,
     advancerPlayerId: eventItem.advancerPlayerId ?? null,
     participantPlayerIds: eventItem.participantPlayerIds ?? [],
+    impactLines: eventItem.impactLines ?? null,
     impactMode: eventItem.impactMode ?? null,
     affectsDebt: eventItem.affectsDebt ?? null,
+    debtImpactBucket: eventItem.debtImpactBucket ?? null,
+    debtImpactActive: eventItem.debtImpactActive ?? null,
     balanceBeforeVnd: eventItem.balanceBeforeVnd ?? null,
     balanceAfterVnd: eventItem.balanceAfterVnd ?? null,
     metadata: eventItem.metadata ?? null,
@@ -323,6 +369,7 @@ type MatchStakesHistoryUnifiedCompatItem = MatchStakesHistoryItemDto & {
   outstandingBeforeVnd?: number | null;
   outstandingAfterVnd?: number | null;
   debtPeriodId?: string | null;
+  impactLines?: MatchStakesHistoryItemDto["impactLines"];
   metadata?: unknown;
   matchRows?: DebtPeriodTimelinePlayerRowDto[];
 };
@@ -339,8 +386,54 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const toOptionalNumber = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const toOptionalString = (value: unknown): string | null => (typeof value === "string" && value.trim().length > 0 ? value : null);
 const toOptionalBoolean = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
+const toOptionalBucket = (value: unknown) => (value === "MATCH" || value === "ADVANCE" ? value : null);
 const toStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+const toImpactLines = (value: unknown): MatchStakesHistoryItemDto["impactLines"] | null => {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const lines = value
+    .map((line) => {
+      if (!isRecord(line)) {
+        return null;
+      }
+
+      const playerId = toOptionalString(line["playerId"]);
+      const playerName = toOptionalString(line["playerName"]);
+      const netDeltaVnd = toOptionalNumber(line["netDeltaVnd"]);
+      const allocatedShareVnd = toOptionalNumber(line["allocatedShareVnd"]);
+      const debtBeforeVnd = toOptionalNumber(line["debtBeforeVnd"]);
+      const debtAfterVnd = toOptionalNumber(line["debtAfterVnd"]);
+      const amountVnd = toOptionalNumber(line["amountVnd"]);
+
+      if (
+        playerId === null &&
+        playerName === null &&
+        netDeltaVnd === null &&
+        allocatedShareVnd === null &&
+        debtBeforeVnd === null &&
+        debtAfterVnd === null &&
+        amountVnd === null
+      ) {
+        return null;
+      }
+
+      return {
+        playerId,
+        playerName,
+        netDeltaVnd,
+        allocatedShareVnd,
+        debtBeforeVnd,
+        debtAfterVnd,
+        amountVnd
+      };
+    })
+    .filter((line): line is NonNullable<typeof line> => line !== null);
+
+  return lines.length > 0 ? lines : null;
+};
 
 const normalizeHistoryItemType = (
   itemType: MatchStakesHistoryUnifiedCompatItem["itemType"] | string | null | undefined,
@@ -520,10 +613,18 @@ const mapServerHistoryItem = (
     (metadataDetails && toOptionalString(metadataDetails["eventType"])) ?? (metadata ? toOptionalString(metadata["eventType"]) : null);
   const metadataImpactMode = metadataDetails ? toOptionalString(metadataDetails["impactMode"]) : null;
   const metadataAffectsDebt = metadataDetails ? toOptionalBoolean(metadataDetails["affectsDebt"]) : null;
+  const metadataDebtImpactBucket = metadataDetails ? toOptionalBucket(metadataDetails["debtImpactBucket"]) : null;
+  const metadataDebtImpactActive = metadataDetails ? toOptionalBoolean(metadataDetails["debtImpactActive"]) : null;
   const metadataEventStatus = metadataDetails ? toOptionalString(metadataDetails["eventStatus"]) : null;
   const metadataResetAt = metadataDetails ? toOptionalString(metadataDetails["resetAt"]) : null;
   const metadataResetReason = metadataDetails ? toOptionalString(metadataDetails["resetReason"]) : null;
   const metadataParticipantPlayerIds = metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
+  const metadataImpactLines = metadataDetails ? toImpactLines(metadataDetails["impactLines"]) : null;
+  const metadataAdvancerPlayerId =
+    metadataDetails &&
+    (toOptionalString(metadataDetails["advancerPlayerId"]) ??
+      toOptionalString(metadataDetails["playerId"]) ??
+      toOptionalString(metadataDetails["actorPlayerId"]));
   const eventType = compatItem.eventType ?? metadataEventType;
   const resolvedItemType = normalizeHistoryItemType(compatItem.itemType, eventType, compatItem.matchId);
   const timelineMatch = compatItem.matchId ? context?.timelineMatchById?.get(compatItem.matchId) : undefined;
@@ -564,15 +665,18 @@ const mapServerHistoryItem = (
       (metadataEventStatus === "ACTIVE" || metadataEventStatus === "RESET" ? metadataEventStatus : null),
     resetAt: compatItem.resetAt ?? metadataResetAt ?? null,
     resetReason: compatItem.resetReason ?? metadataResetReason ?? null,
-    advancerPlayerId: compatItem.advancerPlayerId ?? advanceActorFromMetadata?.id ?? resolvedPlayerId,
+    advancerPlayerId: compatItem.advancerPlayerId ?? metadataAdvancerPlayerId ?? advanceActorFromMetadata?.id ?? resolvedPlayerId,
     participantPlayerIds:
       Array.isArray(compatItem.participantPlayerIds) && compatItem.participantPlayerIds.length > 0
         ? compatItem.participantPlayerIds
         : metadataParticipantPlayerIds,
+    impactLines: compatItem.impactLines ?? metadataImpactLines ?? null,
     impactMode:
       compatItem.impactMode ??
       (metadataImpactMode === "AFFECTS_DEBT" || metadataImpactMode === "INFORMATIONAL" ? metadataImpactMode : null),
     affectsDebt: toOptionalBoolean(compatItem.affectsDebt) ?? metadataAffectsDebt,
+    debtImpactBucket: compatItem.debtImpactBucket ?? metadataDebtImpactBucket,
+    debtImpactActive: toOptionalBoolean(compatItem.debtImpactActive) ?? metadataDebtImpactActive,
     balanceBeforeVnd:
       typeof compatItem.balanceBeforeVnd === "number"
         ? compatItem.balanceBeforeVnd
@@ -607,7 +711,16 @@ export const MatchStakesPage = () => {
     }
 
     const saved = window.localStorage.getItem(CURRENT_DEBT_VIEW_MODE_STORAGE_KEY);
-    return saved === "match-only" ? "match-only" : DEFAULT_CURRENT_DEBT_VIEW_MODE;
+    if (saved === "match-only" || saved === "advance-only" || saved === "combined") {
+      return saved;
+    }
+
+    // Backward compatibility with legacy mode naming.
+    if (saved === "after-advance") {
+      return "combined";
+    }
+
+    return DEFAULT_CURRENT_DEBT_VIEW_MODE;
   });
   const [historyViewMode, setHistoryViewMode] = useState<HistoryViewMode>(() => {
     if (typeof window === "undefined") {
@@ -735,35 +848,28 @@ export const MatchStakesPage = () => {
   const sortedPlayers = useMemo(() => sortOutstandingPlayers(activeTimeline?.players ?? []), [activeTimeline?.players]);
   const currentDebtPlayers = useMemo<CurrentDebtDisplayPlayer[]>(() => {
     const players = activeTimeline?.players ?? [];
-    const initialByPlayerId = new Map((activeTimeline?.initialRows ?? []).map((row) => [row.playerId, row.cumulativeNetVnd]));
-    const latestMatchByPlayerId = new Map<string, number>();
-
-    for (const matchItem of activeTimeline?.history ?? []) {
-      for (const row of matchItem.players) {
-        if (!latestMatchByPlayerId.has(row.playerId)) {
-          latestMatchByPlayerId.set(row.playerId, row.cumulativeNetVnd);
-        }
-      }
-    }
 
     return players.map((player) => {
-      const initialNetVnd = typeof player.initNetVnd === "number" ? player.initNetVnd : (initialByPlayerId.get(player.playerId) ?? 0);
-      const matchOnlyOutstandingVnd = latestMatchByPlayerId.get(player.playerId) ?? initialByPlayerId.get(player.playerId) ?? initialNetVnd;
-      const displayOutstandingVnd =
-        currentDebtViewMode === "match-only" ? matchOnlyOutstandingVnd : player.outstandingNetVnd;
+      const matchBucketNetVnd = resolveMatchBucketNetVnd(player);
+      const advanceBucketNetVnd = resolveAdvanceBucketNetVnd(player);
+      const combinedBucketNetVnd = resolveCombinedBucketNetVnd(player);
+      const outstandingCombinedBucketNetVnd = resolveOutstandingCombinedBucketNetVnd(player);
 
       return {
         ...player,
-        initNetVnd: initialNetVnd,
-        displayOutstandingVnd,
-        matchOnlyNetFromMatchesVnd: matchOnlyOutstandingVnd - initialNetVnd
+        displayOutstandingVnd: getDebtValueByMode(player, currentDebtViewMode),
+        matchBucketNetVnd,
+        advanceBucketNetVnd,
+        combinedBucketNetVnd,
+        outstandingCombinedBucketNetVnd
       };
     });
-  }, [activeTimeline?.history, activeTimeline?.initialRows, activeTimeline?.players, currentDebtViewMode]);
+  }, [activeTimeline?.players, currentDebtViewMode]);
   const sortedCurrentDebtPlayers = useMemo(
     () => sortByNetAmount(currentDebtPlayers, (player) => player.displayOutstandingVnd),
     [currentDebtPlayers]
   );
+  const hasCombinedOnlyInitialBalance = activeSummary?.initialBalanceDecomposition === "COMBINED_ONLY";
   const initialPlayers = useMemo(
     () => sortTimelineRows(activeTimeline?.initialRows ?? []),
     [activeTimeline?.initialRows]
@@ -1027,9 +1133,9 @@ export const MatchStakesPage = () => {
         playerId: row.playerId,
         playerName: row.playerName,
         placement: typeof row.tftPlacement === "number" ? row.tftPlacement : row.relativeRank,
-        matchNetVnd: row.matchNetVnd,
-        debtBeforeVnd: row.cumulativeNetVnd - row.matchNetVnd,
-        debtAfterVnd: row.cumulativeNetVnd
+        matchNetVnd: row.combinedDeltaVnd ?? row.matchNetVnd,
+        debtBeforeVnd: (row.cumulativeCombinedNetVnd ?? row.cumulativeNetVnd) - (row.combinedDeltaVnd ?? row.matchNetVnd),
+        debtAfterVnd: row.cumulativeCombinedNetVnd ?? row.cumulativeNetVnd
       }))
     });
   };
@@ -1073,7 +1179,9 @@ export const MatchStakesPage = () => {
                     <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
-                        <div className={`text-base font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
+                        <div className={`text-base font-semibold ${getOutstandingClassName(row.cumulativeCombinedNetVnd ?? row.cumulativeNetVnd)}`}>
+                          {formatSignedVnd(row.cumulativeCombinedNetVnd ?? row.cumulativeNetVnd)}
+                        </div>
                       </div>
 
                       {historyViewMode === "detail" ? (
@@ -1081,7 +1189,9 @@ export const MatchStakesPage = () => {
                           <div className={`font-medium ${getPlacementToneClassName(row)}`}>
                             {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
                           </div>
-                          <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
+                          <div className={getOutstandingClassName(row.combinedDeltaVnd ?? row.matchNetVnd)}>
+                            {`Match ${formatSignedVnd(row.combinedDeltaVnd ?? row.matchNetVnd)}`}
+                          </div>
                         </div>
                       ) : null}
                     </div>
@@ -1101,7 +1211,7 @@ export const MatchStakesPage = () => {
               {sortTimelineRows(periodTimeline.initialRows).map((row) => (
                 <div key={`${periodTimeline.period.id}-init-${row.playerId}`} className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-slate-600">{row.playerName}</span>
-                  <span className="font-medium text-slate-600">{formatSignedVnd(row.cumulativeNetVnd)}</span>
+                  <span className="font-medium text-slate-600">{formatSignedVnd(row.cumulativeCombinedNetVnd ?? row.cumulativeNetVnd)}</span>
                 </div>
               ))}
             </div>
@@ -1248,7 +1358,8 @@ export const MatchStakesPage = () => {
               value={currentDebtViewMode}
               options={[
                 { label: "Match only", value: "match-only" },
-                { label: "After advance", value: "after-advance" }
+                { label: "Advance only", value: "advance-only" },
+                { label: "Combined", value: "combined" }
               ]}
               onChange={(value) => setCurrentDebtViewMode(value as CurrentDebtViewMode)}
             />
@@ -1269,6 +1380,13 @@ export const MatchStakesPage = () => {
             <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
           ) : (
             <div className="space-y-2.5">
+              {hasCombinedOnlyInitialBalance && currentDebtViewMode !== "combined" ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Initial carry-forward is COMBINED_ONLY. Match/Advance views exclude unsplit opening balance."
+                />
+              ) : null}
               {sortedCurrentDebtPlayers.map((player) => (
                 <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.displayOutstandingVnd)}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1277,11 +1395,15 @@ export const MatchStakesPage = () => {
                       {formatSignedVnd(player.displayOutstandingVnd)}
                     </div>
                   </div>
-                  {currentDebtViewMode === "after-advance" ? (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Accrued ${formatVnd(player.accruedNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
-                  ) : (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Init ${formatVnd(player.initNetVnd ?? 0)} | Match net ${formatSignedVnd(player.matchOnlyNetFromMatchesVnd)}`}</div>
-                  )}
+                  {currentDebtViewMode === "match-only" ? (
+                    <div className="mt-1 text-[11px] text-slate-500">{`Match net ${formatSignedVnd(player.matchBucketNetVnd)} | Accrued match ${formatVnd(player.accruedMatchNetVnd ?? 0)}`}</div>
+                  ) : null}
+                  {currentDebtViewMode === "advance-only" ? (
+                    <div className="mt-1 text-[11px] text-slate-500">{`Advance net ${formatSignedVnd(player.advanceBucketNetVnd)} | Accrued advance ${formatVnd(player.accruedAdvanceNetVnd ?? 0)}`}</div>
+                  ) : null}
+                  {currentDebtViewMode === "combined" ? (
+                    <div className="mt-1 text-[11px] text-slate-500">{`Combined net ${formatSignedVnd(player.combinedBucketNetVnd)} | Outstanding ${formatSignedVnd(player.outstandingCombinedBucketNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1361,7 +1483,7 @@ export const MatchStakesPage = () => {
                     {initialPlayers.map((player) => (
                       <div key={player.playerId} className="flex items-center justify-between gap-2 text-xs">
                         <span className="text-slate-600">{player.playerName}</span>
-                        <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
+                        <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeCombinedNetVnd ?? player.cumulativeNetVnd)}</span>
                       </div>
                     ))}
                   </div>
@@ -1436,7 +1558,7 @@ export const MatchStakesPage = () => {
                         {sortTimelineRows(periodTimeline.initialRows).map((player) => (
                           <div key={`${periodTimeline.period.id}-init-${player.playerId}`} className="flex items-center justify-between gap-2 text-xs">
                             <span className="text-slate-600">{player.playerName}</span>
-                            <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
+                            <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeCombinedNetVnd ?? player.cumulativeNetVnd)}</span>
                           </div>
                         ))}
                       </div>

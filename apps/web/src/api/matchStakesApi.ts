@@ -92,6 +92,12 @@ type MatchStakesHistoryEventV2Payload =
       debtPeriodId?: string;
     };
 
+const isAdvanceEventType = (eventType: CreateMatchStakesHistoryEventRequest["eventType"]) =>
+  eventType === "MATCH_STAKES_ADVANCE" || eventType === "ADVANCE";
+
+const isNoteEventType = (eventType: CreateMatchStakesHistoryEventRequest["eventType"]) =>
+  eventType === "MATCH_STAKES_NOTE" || eventType === "NOTE";
+
 const toOptionalIso = (value: string | undefined) => {
   if (!value) {
     return undefined;
@@ -166,9 +172,14 @@ const normalizeHistoryEventPayload = (payload: CreateMatchStakesHistoryEventRequ
   const normalizedAmountVnd = toPositiveInteger(payload.amountVnd);
   const participantPlayerIds = normalizeIdArray(payload.participantPlayerIds);
   const beneficiaryPlayerIds = normalizeIdArray(payload.beneficiaryPlayerIds);
+  const debtPeriodId = typeof payload.debtPeriodId === "string" && payload.debtPeriodId.trim().length > 0 ? payload.debtPeriodId : null;
+  const periodId =
+    typeof payload.periodId === "string" && payload.periodId.trim().length > 0 ? payload.periodId : debtPeriodId;
 
   return {
     ...payload,
+    periodId,
+    debtPeriodId: debtPeriodId ?? periodId,
     amountVnd: normalizedAmountVnd,
     participantPlayerIds,
     beneficiaryPlayerIds
@@ -176,7 +187,7 @@ const normalizeHistoryEventPayload = (payload: CreateMatchStakesHistoryEventRequ
 };
 
 const toMatchStakesHistoryEventV2Payload = (payload: CreateMatchStakesHistoryEventRequest): MatchStakesHistoryEventV2Payload | null => {
-  if (payload.eventType === "ADVANCE") {
+  if (isAdvanceEventType(payload.eventType)) {
     const amountVnd = toPositiveInteger(payload.amountVnd);
     const advancerPlayerId = typeof payload.playerId === "string" ? payload.playerId.trim() : "";
     if (!advancerPlayerId || amountVnd === null) {
@@ -201,17 +212,17 @@ const toMatchStakesHistoryEventV2Payload = (payload: CreateMatchStakesHistoryEve
       amountVnd,
       note: payload.note?.trim() || null,
       impactMode: payload.impactMode,
-      debtPeriodId: payload.periodId ?? undefined
+      debtPeriodId: payload.debtPeriodId ?? payload.periodId ?? undefined
     };
   }
 
-  if (payload.eventType === "NOTE") {
+  if (isNoteEventType(payload.eventType)) {
     return {
       eventType: "MATCH_STAKES_NOTE",
       postedAt: toOptionalIso(payload.postedAt),
       note: payload.note?.trim() || payload.reason?.trim() || "Note",
       playerId: payload.playerId ?? undefined,
-      debtPeriodId: payload.periodId ?? undefined
+      debtPeriodId: payload.debtPeriodId ?? payload.periodId ?? undefined
     };
   }
 
@@ -297,8 +308,9 @@ export const matchStakesApi = {
       }
     }
 
-    const candidateUrls = normalizedPayload.periodId
-      ? [`/match-stakes/debt-periods/${normalizedPayload.periodId}/history`, "/match-stakes/history"]
+    const fallbackPeriodId = normalizedPayload.debtPeriodId ?? normalizedPayload.periodId;
+    const candidateUrls = fallbackPeriodId
+      ? [`/match-stakes/debt-periods/${fallbackPeriodId}/history`, "/match-stakes/history"]
       : ["/match-stakes/history"];
 
     for (const url of candidateUrls) {

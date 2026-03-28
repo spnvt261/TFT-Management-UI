@@ -231,7 +231,8 @@ export const MatchStakesHistoryEventModal = ({
 
           await onSubmit({
             periodId: openPeriodId ?? null,
-            eventType: "ADVANCE",
+            debtPeriodId: openPeriodId ?? null,
+            eventType: "MATCH_STAKES_ADVANCE",
             playerId: values.playerId || null,
             participantPlayerIds: submitParticipantIds,
             amountVnd: submitAmountVnd,

@@ -33,6 +33,16 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
 const toOptionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const toOptionalBoolean = (value: unknown) => (typeof value === "boolean" ? value : null);
+const toOptionalBucket = (value: unknown) => (value === "MATCH" || value === "ADVANCE" ? value : null);
+const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return null;
+};
 const toStringArray = (value: unknown) => {
   if (!Array.isArray(value)) {
     return [];
@@ -57,15 +67,69 @@ const toStringArray = (value: unknown) => {
 
   return normalized;
 };
-const getHighestPositiveImpactRow = (rows: ReturnType<typeof normalizeTimelineRow>[]) => {
+const toImpactLines = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const lines = value
+    .map((line) => {
+      if (!isRecord(line)) {
+        return null;
+      }
+
+      const playerId = toOptionalString(line["playerId"]);
+      const playerName = toOptionalString(line["playerName"]);
+      const netDeltaVnd = toOptionalNumber(line["netDeltaVnd"]);
+      const allocatedShareVnd = toOptionalNumber(line["allocatedShareVnd"]);
+      const debtBeforeVnd = toOptionalNumber(line["debtBeforeVnd"]);
+      const debtAfterVnd = toOptionalNumber(line["debtAfterVnd"]);
+      const amountVnd = toOptionalNumber(line["amountVnd"]);
+
+      if (playerId === null && playerName === null && netDeltaVnd === null && allocatedShareVnd === null && amountVnd === null) {
+        return null;
+      }
+
+      return {
+        playerId,
+        playerName,
+        netDeltaVnd,
+        allocatedShareVnd,
+        debtBeforeVnd,
+        debtAfterVnd,
+        amountVnd
+      };
+    })
+    .filter((line): line is NonNullable<typeof line> => line !== null);
+
+  return lines.length > 0 ? lines : null;
+};
+
+const getHighestPositiveImpactRow = (
+  rows: ReturnType<typeof normalizeTimelineRow>[],
+  bucket: "MATCH" | "ADVANCE" | "COMBINED" = "COMBINED"
+) => {
   let candidate: ReturnType<typeof normalizeTimelineRow> | null = null;
 
   for (const row of rows) {
-    if (row.matchNetVnd <= 0) {
+    const delta =
+      bucket === "MATCH" ? row.matchDeltaVnd : bucket === "ADVANCE" ? row.advanceDeltaVnd : row.combinedDeltaVnd;
+    if (delta <= 0) {
       continue;
     }
 
-    if (!candidate || row.matchNetVnd > candidate.matchNetVnd) {
+    if (!candidate) {
+      candidate = row;
+      continue;
+    }
+
+    const candidateDelta =
+      bucket === "MATCH"
+        ? candidate.matchDeltaVnd
+        : bucket === "ADVANCE"
+          ? candidate.advanceDeltaVnd
+          : candidate.combinedDeltaVnd;
+    if (delta > candidateDelta) {
       candidate = row;
     }
   }
@@ -141,12 +205,26 @@ const normalizeTimelineRow = (row: {
   playerName: string;
   tftPlacement: number | null;
   relativeRank: number | null;
-  matchNetVnd: number;
-  cumulativeNetVnd: number;
+  matchDeltaVnd?: number | null;
+  advanceDeltaVnd?: number | null;
+  combinedDeltaVnd?: number | null;
+  cumulativeMatchNetVnd?: number | null;
+  cumulativeAdvanceNetVnd?: number | null;
+  cumulativeCombinedNetVnd?: number | null;
+  // legacy compatibility aliases
+  matchNetVnd?: number | null;
+  cumulativeNetVnd?: number | null;
   placementLabel?: string | null;
 }) => {
   const tftPlacement = typeof row.tftPlacement === "number" ? row.tftPlacement : null;
   const relativeRank = typeof row.relativeRank === "number" ? row.relativeRank : null;
+  const matchDeltaVnd = getFirstFiniteNumber(row.matchDeltaVnd, row.matchNetVnd, 0) ?? 0;
+  const advanceDeltaVnd = getFirstFiniteNumber(row.advanceDeltaVnd, 0) ?? 0;
+  const combinedDeltaVnd = getFirstFiniteNumber(row.combinedDeltaVnd, row.matchNetVnd, matchDeltaVnd + advanceDeltaVnd) ?? 0;
+  const cumulativeMatchNetVnd = getFirstFiniteNumber(row.cumulativeMatchNetVnd, row.cumulativeNetVnd, 0) ?? 0;
+  const cumulativeAdvanceNetVnd = getFirstFiniteNumber(row.cumulativeAdvanceNetVnd, 0) ?? 0;
+  const cumulativeCombinedNetVnd =
+    getFirstFiniteNumber(row.cumulativeCombinedNetVnd, row.cumulativeNetVnd, cumulativeMatchNetVnd + cumulativeAdvanceNetVnd) ?? 0;
 
   return {
     playerId: row.playerId,
@@ -154,8 +232,15 @@ const normalizeTimelineRow = (row: {
     tftPlacement,
     relativeRank,
     placementLabel: row.placementLabel ?? toPlacementLabel(tftPlacement, relativeRank),
-    matchNetVnd: Number(row.matchNetVnd ?? 0),
-    cumulativeNetVnd: Number(row.cumulativeNetVnd ?? 0)
+    matchDeltaVnd,
+    advanceDeltaVnd,
+    combinedDeltaVnd,
+    cumulativeMatchNetVnd,
+    cumulativeAdvanceNetVnd,
+    cumulativeCombinedNetVnd,
+    // legacy aliases kept for compatibility with existing UI consumers
+    matchNetVnd: combinedDeltaVnd,
+    cumulativeNetVnd: cumulativeCombinedNetVnd
   };
 };
 
@@ -172,8 +257,12 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         playerName: player.playerName,
         tftPlacement: null,
         relativeRank: null,
-        matchNetVnd: 0,
-        cumulativeNetVnd: 0
+        matchDeltaVnd: 0,
+        advanceDeltaVnd: 0,
+        combinedDeltaVnd: 0,
+        cumulativeMatchNetVnd: 0,
+        cumulativeAdvanceNetVnd: 0,
+        cumulativeCombinedNetVnd: 0
       })
     );
 
@@ -186,6 +275,12 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
           playerName: row.playerName,
           tftPlacement: row.tftPlacement,
           relativeRank: row.relativeRank,
+          matchDeltaVnd: row.matchDeltaVnd,
+          advanceDeltaVnd: row.advanceDeltaVnd,
+          combinedDeltaVnd: row.combinedDeltaVnd,
+          cumulativeMatchNetVnd: row.cumulativeMatchNetVnd,
+          cumulativeAdvanceNetVnd: row.cumulativeAdvanceNetVnd,
+          cumulativeCombinedNetVnd: row.cumulativeCombinedNetVnd,
           matchNetVnd: row.matchNetVnd,
           cumulativeNetVnd: row.cumulativeNetVnd,
           placementLabel: row.placementLabel
@@ -235,15 +330,33 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
       const metadataParticipantPlayerIds = metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
       const metadataImpactMode = metadataDetails ? toOptionalString(metadataDetails["impactMode"]) : null;
       const metadataAffectsDebt = metadataDetails ? toOptionalBoolean(metadataDetails["affectsDebt"]) : null;
+      const metadataDebtImpactBucket = metadataDetails ? toOptionalBucket(metadataDetails["debtImpactBucket"]) : null;
+      const metadataDebtImpactActive = metadataDetails ? toOptionalBoolean(metadataDetails["debtImpactActive"]) : null;
       const metadataEventStatus = metadataDetails ? toOptionalString(metadataDetails["eventStatus"]) : null;
       const metadataResetAt = metadataDetails ? toOptionalString(metadataDetails["resetAt"]) : null;
       const metadataResetReason = metadataDetails ? toOptionalString(metadataDetails["resetReason"]) : null;
+      const metadataImpactLines = metadataDetails ? toImpactLines(metadataDetails["impactLines"]) : null;
+      const metadataInitialBalanceDecomposition =
+        metadataDetails && metadataDetails["initialBalanceDecomposition"] === "COMBINED_ONLY" ? "COMBINED_ONLY" : null;
+      const metadataAdvancerPlayerId =
+        metadataDetails &&
+        (toOptionalString(metadataDetails["advancerPlayerId"]) ??
+          toOptionalString(metadataDetails["playerId"]) ??
+          toOptionalString(metadataDetails["actorPlayerId"]));
+      const itemParticipantPlayerIds = Array.isArray(item.participantPlayerIds) ? toStringArray(item.participantPlayerIds) : [];
+      const itemImpactLines = toImpactLines(item.impactLines);
+      const itemDebtImpactBucket = toOptionalBucket(item.debtImpactBucket);
+      const itemDebtImpactActive = toOptionalBoolean(item.debtImpactActive);
+      const itemInitialBalanceDecomposition = item.initialBalanceDecomposition === "COMBINED_ONLY" ? "COMBINED_ONLY" : null;
       const normalizedMetadataImpactMode =
         metadataImpactMode === "AFFECTS_DEBT" || metadataImpactMode === "INFORMATIONAL" ? metadataImpactMode : null;
       const fallbackImpactRow =
         item.type === "ADVANCE"
-          ? getHighestPositiveImpactRow(normalizedRows) ?? normalizedRows.find((row) => row.matchNetVnd !== 0) ?? normalizedRows[0]
-          : normalizedRows.find((row) => row.matchNetVnd !== 0) ?? normalizedRows[0];
+          ? getHighestPositiveImpactRow(normalizedRows, "ADVANCE") ??
+            getHighestPositiveImpactRow(normalizedRows, "COMBINED") ??
+            normalizedRows.find((row) => row.combinedDeltaVnd !== 0) ??
+            normalizedRows[0]
+          : normalizedRows.find((row) => row.combinedDeltaVnd !== 0) ?? normalizedRows[0];
 
       events.push({
         id: item.eventId ?? fallbackEventId,
@@ -253,19 +366,23 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         matchId: item.matchId ?? null,
         matchNo: item.matchNo ?? metadataPeriodMatchNo,
         label: item.type === "ADVANCE" ? "Ứng tiền" : "Note",
-        playerId: metadataPlayerId ?? fallbackImpactRow?.playerId ?? null,
+        playerId: metadataPlayerId ?? metadataAdvancerPlayerId ?? fallbackImpactRow?.playerId ?? null,
         playerName: metadataPlayerName ?? fallbackImpactRow?.playerName ?? null,
         amountVnd: typeof item.amountVnd === "number" ? item.amountVnd : null,
         note: item.note ?? null,
         impactMode: item.impactMode ?? normalizedMetadataImpactMode,
         affectsDebt: toOptionalBoolean(item.affectsDebt) ?? metadataAffectsDebt,
+        debtImpactBucket: itemDebtImpactBucket ?? metadataDebtImpactBucket,
+        debtImpactActive: itemDebtImpactActive ?? metadataDebtImpactActive,
+        initialBalanceDecomposition: itemInitialBalanceDecomposition ?? metadataInitialBalanceDecomposition,
         eventStatus:
           item.eventStatus ??
           (metadataEventStatus === "ACTIVE" || metadataEventStatus === "RESET" ? metadataEventStatus : null),
         resetAt: item.resetAt ?? metadataResetAt,
         resetReason: item.resetReason ?? metadataResetReason,
-        advancerPlayerId: metadataPlayerId ?? null,
-        participantPlayerIds: metadataParticipantPlayerIds,
+        advancerPlayerId: metadataAdvancerPlayerId ?? metadataPlayerId ?? null,
+        participantPlayerIds: itemParticipantPlayerIds.length > 0 ? itemParticipantPlayerIds : metadataParticipantPlayerIds,
+        impactLines: itemImpactLines ?? metadataImpactLines,
         rows: normalizedRows,
         metadata
       });
@@ -299,6 +416,12 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
           playerName: player.playerName,
           tftPlacement: player.tftPlacement,
           relativeRank: player.relativeRank,
+          matchDeltaVnd: player.matchDeltaVnd,
+          advanceDeltaVnd: player.advanceDeltaVnd,
+          combinedDeltaVnd: player.combinedDeltaVnd,
+          cumulativeMatchNetVnd: player.cumulativeMatchNetVnd,
+          cumulativeAdvanceNetVnd: player.cumulativeAdvanceNetVnd,
+          cumulativeCombinedNetVnd: player.cumulativeCombinedNetVnd,
           matchNetVnd: player.matchNetVnd,
           cumulativeNetVnd: player.cumulativeNetVnd,
           placementLabel: player.placementLabel
@@ -319,8 +442,12 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         playerName: player.playerName,
         tftPlacement: null,
         relativeRank: null,
-        matchNetVnd: 0,
-        cumulativeNetVnd: 0
+        matchDeltaVnd: 0,
+        advanceDeltaVnd: 0,
+        combinedDeltaVnd: 0,
+        cumulativeMatchNetVnd: 0,
+        cumulativeAdvanceNetVnd: 0,
+        cumulativeCombinedNetVnd: 0
       })
     )
   };
@@ -356,6 +483,12 @@ const buildTimelineFromFallback = (detail: DebtPeriodDetailDto, matches: MatchLi
         tftPlacement: participant.tftPlacement,
         relativeRank: participant.relativeRank,
         placementLabel: toPlacementLabel(participant.tftPlacement, participant.relativeRank),
+        matchDeltaVnd: participant.settlementNetVnd,
+        advanceDeltaVnd: 0,
+        combinedDeltaVnd: participant.settlementNetVnd,
+        cumulativeMatchNetVnd: cumulativeNetVnd,
+        cumulativeAdvanceNetVnd: 0,
+        cumulativeCombinedNetVnd: cumulativeNetVnd,
         matchNetVnd: participant.settlementNetVnd,
         cumulativeNetVnd
       };
@@ -384,8 +517,12 @@ const buildTimelineFromFallback = (detail: DebtPeriodDetailDto, matches: MatchLi
         playerName: player.playerName,
         tftPlacement: null,
         relativeRank: null,
-        matchNetVnd: 0,
-        cumulativeNetVnd: 0
+        matchDeltaVnd: 0,
+        advanceDeltaVnd: 0,
+        combinedDeltaVnd: 0,
+        cumulativeMatchNetVnd: 0,
+        cumulativeAdvanceNetVnd: 0,
+        cumulativeCombinedNetVnd: 0
       })
     )
   };
