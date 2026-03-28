@@ -103,6 +103,16 @@ const getCombinedRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) =>
     getMatchRowCumulative(row) + getAdvanceRowCumulative(row)
   );
 
+const getAdvanceCardDelta = (
+  row: DebtPeriodTimelinePlayerRowDto,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+) => (debtViewMode === "advance-only" ? getAdvanceRowDelta(row) : getCombinedRowDelta(row));
+
+const getAdvanceCardCumulative = (
+  row: DebtPeriodTimelinePlayerRowDto,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+) => (debtViewMode === "advance-only" ? getAdvanceRowCumulative(row) : getCombinedRowCumulative(row));
+
 const normalizeHistoryItemType = (item: MatchStakesHistoryFeedItem) => {
   const rawType = typeof item.itemType === "string" ? item.itemType.toUpperCase() : "";
   const rawEventType = typeof item.eventType === "string" ? item.eventType.toUpperCase() : "";
@@ -208,12 +218,15 @@ const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
   return isRecord(item.metadata.details) ? item.metadata.details : item.metadata;
 };
 
-const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetailRow[] => {
-  const combinedSnapshotByPlayerId = new Map<string, { beforeVnd: number; afterVnd: number }>();
+const buildAdvanceDetailRows = (
+  item: MatchStakesHistoryFeedItem,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+): AdvanceDetailRow[] => {
+  const snapshotByPlayerId = new Map<string, { beforeVnd: number; afterVnd: number }>();
   for (const row of item.matchRows ?? []) {
-    const afterVnd = getCombinedRowCumulative(row);
-    const deltaVnd = getCombinedRowDelta(row);
-    combinedSnapshotByPlayerId.set(row.playerId, {
+    const afterVnd = getAdvanceCardCumulative(row, debtViewMode);
+    const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
+    snapshotByPlayerId.set(row.playerId, {
       beforeVnd: afterVnd - deltaVnd,
       afterVnd
     });
@@ -265,10 +278,10 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
       deltaVnd,
       beforeVnd:
         toOptionalNumber(impactLine["debtBeforeVnd"]) ??
-        (playerId ? combinedSnapshotByPlayerId.get(playerId)?.beforeVnd ?? null : null),
+        (playerId ? snapshotByPlayerId.get(playerId)?.beforeVnd ?? null : null),
       afterVnd:
         toOptionalNumber(impactLine["debtAfterVnd"]) ??
-        (playerId ? combinedSnapshotByPlayerId.get(playerId)?.afterVnd ?? null : null)
+        (playerId ? snapshotByPlayerId.get(playerId)?.afterVnd ?? null : null)
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -290,10 +303,10 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
       deltaVnd: resolvePlayerImpactDelta(impact),
       beforeVnd:
         toOptionalNumber(impact.debtBeforeVnd) ??
-        (impact.playerId ? combinedSnapshotByPlayerId.get(impact.playerId)?.beforeVnd ?? null : null),
+        (impact.playerId ? snapshotByPlayerId.get(impact.playerId)?.beforeVnd ?? null : null),
       afterVnd:
         toOptionalNumber(impact.debtAfterVnd) ??
-        (impact.playerId ? combinedSnapshotByPlayerId.get(impact.playerId)?.afterVnd ?? null : null)
+        (impact.playerId ? snapshotByPlayerId.get(impact.playerId)?.afterVnd ?? null : null)
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -339,13 +352,13 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
 
   const rowsFromMatchRows = sortAdvanceDetailRowsByName(
     item.matchRows
-    .filter((row) => getCombinedRowDelta(row) !== 0)
+    .filter((row) => getAdvanceCardDelta(row, debtViewMode) !== 0)
     .map((row) => ({
       playerId: row.playerId,
       playerName: row.playerName,
-      deltaVnd: getCombinedRowDelta(row),
-      beforeVnd: getCombinedRowCumulative(row) - getCombinedRowDelta(row),
-      afterVnd: getCombinedRowCumulative(row)
+      deltaVnd: getAdvanceCardDelta(row, debtViewMode),
+      beforeVnd: getAdvanceCardCumulative(row, debtViewMode) - getAdvanceCardDelta(row, debtViewMode),
+      afterVnd: getAdvanceCardCumulative(row, debtViewMode)
     }))
   );
 
@@ -387,6 +400,11 @@ type AdvancePlayerSlot = {
   playerName: string;
 };
 
+type AdvanceSlotFallback = {
+  byId: Map<string, AdvanceDetailRow>;
+  byName: Map<string, AdvanceDetailRow>;
+};
+
 const buildAdvancePlayerSlots = (items: MatchStakesHistoryFeedItem[]): AdvancePlayerSlot[] => {
   const byKey = new Map<string, AdvancePlayerSlot>();
 
@@ -423,7 +441,39 @@ const buildAdvancePlayerSlots = (items: MatchStakesHistoryFeedItem[]): AdvancePl
   return slots;
 };
 
-const alignAdvanceRowsWithSlots = (rows: AdvanceDetailRow[], slots: AdvancePlayerSlot[]): AdvanceRenderRow[] => {
+const buildAdvanceSlotFallback = (
+  item: MatchStakesHistoryFeedItem,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+): AdvanceSlotFallback => {
+  const fallback: AdvanceSlotFallback = {
+    byId: new Map<string, AdvanceDetailRow>(),
+    byName: new Map<string, AdvanceDetailRow>()
+  };
+
+  for (const row of item.matchRows ?? []) {
+    const detailRow: AdvanceDetailRow = {
+      playerId: row.playerId ?? null,
+      playerName: row.playerName,
+      deltaVnd: getAdvanceCardDelta(row, debtViewMode),
+      beforeVnd: getAdvanceCardCumulative(row, debtViewMode) - getAdvanceCardDelta(row, debtViewMode),
+      afterVnd: getAdvanceCardCumulative(row, debtViewMode)
+    };
+
+    if (row.playerId) {
+      fallback.byId.set(row.playerId, detailRow);
+    }
+
+    fallback.byName.set(row.playerName.toLowerCase(), detailRow);
+  }
+
+  return fallback;
+};
+
+const alignAdvanceRowsWithSlots = (
+  rows: AdvanceDetailRow[],
+  slots: AdvancePlayerSlot[],
+  fallback: AdvanceSlotFallback
+): AdvanceRenderRow[] => {
   if (slots.length === 0) {
     return rows;
   }
@@ -470,6 +520,20 @@ const alignAdvanceRowsWithSlots = (rows: AdvanceDetailRow[], slots: AdvancePlaye
 
     if (matched) {
       return matched;
+    }
+
+    const fallbackDetail =
+      (slot.playerId ? fallback.byId.get(slot.playerId) : null) ??
+      fallback.byName.get(slot.playerName.toLowerCase()) ??
+      null;
+
+    if (fallbackDetail) {
+      return {
+        ...fallbackDetail,
+        playerId: slot.playerId ?? fallbackDetail.playerId,
+        playerName: slot.playerName,
+        isPlaceholder: true
+      };
     }
 
     return {
@@ -546,20 +610,36 @@ export const MatchStakesHistoryFeed = ({
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
 
+  const visibleItems =
+    debtViewMode === "advance-only"
+      ? items.filter((item) => normalizeHistoryItemType(item) === "ADVANCE")
+      : items;
+
+  if (visibleItems.length === 0) {
+    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+  }
+
   const advancePlayerSlots = buildAdvancePlayerSlots(items);
 
   return (
     <div className="flex flex-wrap gap-2.5">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const itemType = normalizeHistoryItemType(item);
         const itemAmount = typeof item.amountVnd === "number" ? item.amountVnd : null;
         const clickable = itemType === "MATCH" && Boolean(item.matchId);
         const hasMatchRows = itemType === "MATCH" && Array.isArray(item.matchRows) && item.matchRows.length > 0;
         const sortedMatchRows = hasMatchRows ? sortMatchRows(item.matchRows ?? []) : [];
         const advanceNoteTag = itemType === "ADVANCE" ? item.note?.trim() ?? null : null;
-        const rawAdvanceDetailRows = itemType === "ADVANCE" ? buildAdvanceDetailRows(item) : [];
+        const rawAdvanceDetailRows =
+          itemType === "ADVANCE" ? buildAdvanceDetailRows(item, debtViewMode) : [];
+        const advanceSlotFallback =
+          itemType === "ADVANCE"
+            ? buildAdvanceSlotFallback(item, debtViewMode)
+            : { byId: new Map<string, AdvanceDetailRow>(), byName: new Map<string, AdvanceDetailRow>() };
         const advanceDetailRows =
-          itemType === "ADVANCE" ? alignAdvanceRowsWithSlots(rawAdvanceDetailRows, advancePlayerSlots) : [];
+          itemType === "ADVANCE"
+            ? alignAdvanceRowsWithSlots(rawAdvanceDetailRows, advancePlayerSlots, advanceSlotFallback)
+            : [];
         const resetLabel = itemType === "ADVANCE" ? toResetLabel(item) : null;
         const canResetAdvance = itemType === "ADVANCE" && item.eventStatus === "ACTIVE" && !!onRequestResetAdvance;
         const advanceHeadlineLabel =
@@ -700,8 +780,9 @@ export const MatchStakesHistoryFeed = ({
                   const isPlaceholder = Boolean(row.isPlaceholder);
                   const afterVnd = row.afterVnd ?? row.deltaVnd;
                   const beforeVnd = row.beforeVnd ?? (afterVnd - row.deltaVnd);
-                  const isCombinedMode = debtViewMode === "combined";
-                  const headlineVnd = isCombinedMode ? afterVnd : row.deltaVnd;
+                  const shouldShowCumulativeHeadline =
+                    debtViewMode === "combined" || debtViewMode === "advance-only";
+                  const headlineVnd = shouldShowCumulativeHeadline ? afterVnd : row.deltaVnd;
                   return (
                     <div
                       key={`${item.id}-advance-${row.playerId ?? index}`}
