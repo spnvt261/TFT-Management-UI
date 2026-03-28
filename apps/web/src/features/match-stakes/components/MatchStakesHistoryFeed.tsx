@@ -262,7 +262,7 @@ export const MatchStakesHistoryFeed = ({
   }
 
   return (
-    <div className="space-y-2.5">
+    <div className="flex flex-wrap gap-2.5">
       {items.map((item) => {
         const itemType = normalizeHistoryItemType(item);
         const itemAmount = typeof item.amountVnd === "number" ? item.amountVnd : null;
@@ -278,7 +278,7 @@ export const MatchStakesHistoryFeed = ({
         return (
           <div
             key={item.id}
-            className={`focus-ring w-full rounded-lg border border-slate-200 bg-white p-3 text-left transition ${
+            className={`focus-ring w-full sm:w-[calc(50%-0.3125rem)] xl:w-[calc(33.333%-0.5rem)] rounded-lg border border-slate-200 bg-white p-3 text-left transition ${
               clickable ? "cursor-pointer hover:border-brand-500" : "cursor-default"
             }`}
             role={clickable ? "button" : undefined}
@@ -398,7 +398,7 @@ export const MatchStakesHistoryFeed = ({
               </div>
             ) : null}
 
-            {itemType === "ADVANCE" && viewMode === "detail" ? (
+            {itemType === "ADVANCE" ? (
               <div className="mt-2 space-y-1.5 text-[11px] text-slate-500">
                 {advanceDetailRows.map((row, index) => {
                   const isReceive = row.deltaVnd > 0;

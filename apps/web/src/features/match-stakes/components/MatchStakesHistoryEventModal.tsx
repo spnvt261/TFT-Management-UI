@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Button, Input, InputNumber, Modal, Select } from "antd";
+import { Button, Input, InputNumber, Modal, Radio, Select, Tag } from "antd";
 import { Controller, useForm } from "react-hook-form";
 import { FormApiError } from "@/components/common/FormApiError";
 import { historyEventSchema, type HistoryEventValues } from "@/features/match-stakes/schemas";
@@ -16,31 +16,74 @@ interface MatchStakesHistoryEventModalProps {
   canWrite: boolean;
   loading: boolean;
   apiError: string | null;
-  defaultPeriodId?: string;
-  periodOptions: SelectOption[];
+  openPeriodId?: string;
+  openPeriodNo?: number;
   playerOptions: SelectOption[];
   onCancel: () => void;
   onSubmit: (payload: CreateMatchStakesHistoryEventRequest) => Promise<void>;
 }
 
-const eventTypeOptions = [
-  { value: "ADVANCE", label: "Advance" },
-  { value: "DEBT_SETTLEMENT", label: "Debt Settlement" },
-  { value: "NOTE", label: "Note" }
-];
+const ADVANCE_SELECTION_STORAGE_KEY = "tft2.match-stakes.history-event.advance-selection";
+const NOTE_PRESET_OPTIONS = [
+  { value: "MACHINE", label: "Tiền máy", note: "Tiền máy" },
+  { value: "TABLE", label: "Tiền bàn", note: "Tiền bàn" },
+  { value: "FOOD", label: "Tiền ăn", note: "Tiền ăn" },
+  { value: "OTHER", label: "Khác", note: "" }
+] as const;
 
-const impactModeOptions = [
-  { value: "AFFECTS_DEBT", label: "Affects debt" },
-  { value: "INFORMATIONAL", label: "Informational only" }
-];
+type NotePreset = (typeof NOTE_PRESET_OPTIONS)[number]["value"];
+type AdvanceSelectionSnapshot = {
+  participantPlayerIds: string[];
+  playerId: string | null;
+};
+
+const readAdvanceSelectionSnapshot = (): AdvanceSelectionSnapshot => {
+  if (typeof window === "undefined") {
+    return { participantPlayerIds: [], playerId: null };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(ADVANCE_SELECTION_STORAGE_KEY);
+    if (!raw) {
+      return { participantPlayerIds: [], playerId: null };
+    }
+
+    const parsed = JSON.parse(raw) as Partial<AdvanceSelectionSnapshot>;
+    const participantPlayerIds = Array.isArray(parsed.participantPlayerIds)
+      ? parsed.participantPlayerIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    const playerId = typeof parsed.playerId === "string" && parsed.playerId.trim().length > 0 ? parsed.playerId : null;
+
+    return { participantPlayerIds, playerId };
+  } catch {
+    return { participantPlayerIds: [], playerId: null };
+  }
+};
+
+const writeAdvanceSelectionSnapshot = (snapshot: AdvanceSelectionSnapshot) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(ADVANCE_SELECTION_STORAGE_KEY, JSON.stringify(snapshot));
+};
+
+const getNoteByPreset = (preset: NotePreset, otherValue: string) => {
+  if (preset === "OTHER") {
+    return otherValue.trim();
+  }
+
+  const found = NOTE_PRESET_OPTIONS.find((option) => option.value === preset);
+  return found?.note ?? "";
+};
 
 export const MatchStakesHistoryEventModal = ({
   open,
   canWrite,
   loading,
   apiError,
-  defaultPeriodId,
-  periodOptions,
+  openPeriodId,
+  openPeriodNo,
   playerOptions,
   onCancel,
   onSubmit
@@ -99,68 +142,81 @@ export const MatchStakesHistoryEventModal = ({
     setValue,
     handleSubmit,
     formState: { errors }
-  } = useForm<HistoryEventValues & { periodId?: string }>({
+  } = useForm<HistoryEventValues>({
     resolver: zodResolver(historyEventSchema),
     defaultValues: {
-      periodId: defaultPeriodId,
       eventType: "ADVANCE",
       playerId: "",
       participantPlayerIds: [],
       amountVnd: undefined,
-      note: "",
+      note: "Tiền máy",
       impactMode: "AFFECTS_DEBT"
     }
   });
+  const [notePreset, setNotePreset] = useState<NotePreset>("MACHINE");
+  const [noteOther, setNoteOther] = useState("");
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    const snapshot = readAdvanceSelectionSnapshot();
+    const availablePlayerIds = new Set(playerOptions.map((option) => option.value));
+    const participantPlayerIds = snapshot.participantPlayerIds.filter((playerId) => availablePlayerIds.has(playerId));
+    const playerId = snapshot.playerId && participantPlayerIds.includes(snapshot.playerId) ? snapshot.playerId : "";
+
     reset({
-      periodId: defaultPeriodId,
       eventType: "ADVANCE",
-      playerId: "",
-      participantPlayerIds: [],
+      playerId,
+      participantPlayerIds,
       amountVnd: undefined,
-      note: "",
+      note: "Tiền máy",
       impactMode: "AFFECTS_DEBT"
     });
-  }, [defaultPeriodId, open, reset]);
+    setNotePreset("MACHINE");
+    setNoteOther("");
+  }, [open, playerOptions, reset]);
 
-  const eventType = watch("eventType");
   const selectedParticipants = watch("participantPlayerIds");
   const selectedPlayerId = watch("playerId");
-  const noteValue = watch("note");
   const amountValue = watch("amountVnd");
+  const noteValue = watch("note");
+
   const normalizedAmountVnd = toPositiveInteger(amountValue);
-  const requiresAmount = eventType === "ADVANCE" || eventType === "DEBT_SETTLEMENT";
   const participantPlayerIds = Array.isArray(selectedParticipants)
     ? selectedParticipants.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
-  const advancerOptions = useMemo(() => {
-    if (eventType !== "ADVANCE") {
-      return playerOptions;
-    }
 
+  const advancerOptions = useMemo(() => {
     const participantIdSet = new Set(participantPlayerIds);
     return playerOptions.filter((option) => participantIdSet.has(option.value));
-  }, [eventType, participantPlayerIds, playerOptions]);
+  }, [participantPlayerIds, playerOptions]);
 
   useEffect(() => {
-    if (eventType !== "ADVANCE") {
-      return;
-    }
-
     if (selectedPlayerId && !participantPlayerIds.includes(selectedPlayerId)) {
       setValue("playerId", "", { shouldValidate: true });
     }
-  }, [eventType, participantPlayerIds, selectedPlayerId, setValue]);
+  }, [participantPlayerIds, selectedPlayerId, setValue]);
+
+  useEffect(() => {
+    writeAdvanceSelectionSnapshot({
+      participantPlayerIds,
+      playerId: selectedPlayerId || null
+    });
+  }, [participantPlayerIds, selectedPlayerId]);
+
+  useEffect(() => {
+    setValue("note", getNoteByPreset(notePreset, noteOther), { shouldValidate: true });
+  }, [noteOther, notePreset, setValue]);
 
   const canSubmit =
+    Boolean(openPeriodId) &&
     noteValue.trim().length > 0 &&
-    (!requiresAmount || normalizedAmountVnd !== null) &&
-    (eventType !== "ADVANCE" || (participantPlayerIds.length > 0 && !!selectedPlayerId && participantPlayerIds.includes(selectedPlayerId))) &&
+    normalizedAmountVnd !== null &&
+    participantPlayerIds.length > 0 &&
+    !!selectedPlayerId &&
+    participantPlayerIds.includes(selectedPlayerId) &&
     !loading;
 
   return (
@@ -173,150 +229,108 @@ export const MatchStakesHistoryEventModal = ({
             ? values.participantPlayerIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
             : [];
 
-          const payload: CreateMatchStakesHistoryEventRequest = {
-            periodId: values.periodId || defaultPeriodId || null,
-            eventType: values.eventType,
+          await onSubmit({
+            periodId: openPeriodId ?? null,
+            eventType: "ADVANCE",
             playerId: values.playerId || null,
+            participantPlayerIds: submitParticipantIds,
             amountVnd: submitAmountVnd,
-            note: values.note?.trim() || null,
-            impactMode: values.impactMode,
-            affectsDebt: values.impactMode === "AFFECTS_DEBT"
-          };
-
-          if (values.eventType === "ADVANCE") {
-            payload.participantPlayerIds = submitParticipantIds;
-          }
-
-          await onSubmit(payload);
+            note: getNoteByPreset(notePreset, noteOther) || null,
+            impactMode: "AFFECTS_DEBT",
+            affectsDebt: true
+          });
         })}
       >
         <FormApiError message={apiError} />
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag color="green">{openPeriodNo ? `Period #${openPeriodNo}` : "No open period"}</Tag>
+          <Tag color="purple">Advance</Tag>
+          <Tag color="geekblue">Impact mode</Tag>
+        </div>
+
         <div>
-          <label className="mb-1 block text-sm font-medium">Debt period</label>
+          <label className="mb-1 block text-sm font-medium">Participants</label>
           <Controller
             control={control}
-            name={"periodId"}
+            name="participantPlayerIds"
             render={({ field }) => (
               <Select
-                value={field.value || undefined}
-                options={periodOptions}
-                onChange={(value) => field.onChange(value)}
-                placeholder="Select debt period"
+                mode="multiple"
+                value={field.value}
+                options={playerOptions}
+                onChange={(value) => field.onChange(value ?? [])}
+                placeholder="Select participants"
+                status={errors.participantPlayerIds ? "error" : ""}
                 className="w-full"
               />
             )}
           />
+          {errors.participantPlayerIds ? <div className="mt-1 text-xs text-red-600">{errors.participantPlayerIds.message}</div> : null}
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Event type</label>
+          <label className="mb-1 block text-sm font-medium">Advancer (paid first)</label>
           <Controller
             control={control}
-            name="eventType"
-            render={({ field }) => <Select value={field.value} options={eventTypeOptions} onChange={field.onChange} className="w-full" />}
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium">{eventType === "ADVANCE" ? "Participants" : "Player"}</label>
-          {eventType === "ADVANCE" ? (
-            <Controller
-              control={control}
-              name="participantPlayerIds"
-              render={({ field }) => (
-                <Select
-                  mode="multiple"
-                  value={field.value}
-                  options={playerOptions}
-                  onChange={(value) => field.onChange(value ?? [])}
-                  placeholder="Select participants"
-                  status={errors.participantPlayerIds ? "error" : ""}
-                  className="w-full"
-                />
-              )}
-            />
-          ) : (
-            <Controller
-              control={control}
-              name="playerId"
-              render={({ field }) => (
-                <Select
-                  allowClear
-                  value={field.value || undefined}
-                  options={playerOptions}
-                  onChange={(value) => field.onChange(value ?? "")}
-                  placeholder="Optional player"
-                  status={errors.playerId ? "error" : ""}
-                  className="w-full"
-                />
-              )}
-            />
-          )}
-          {errors.participantPlayerIds ? <div className="mt-1 text-xs text-red-600">{errors.participantPlayerIds.message}</div> : null}
-          {eventType === "ADVANCE" ? (
-            <div className="mt-3">
-              <label className="mb-1 block text-sm font-medium">Advancer (paid first)</label>
-              <Controller
-                control={control}
-                name="playerId"
-                render={({ field }) => (
-                  <Select
-                    allowClear
-                    value={field.value || undefined}
-                    options={advancerOptions}
-                    onChange={(value) => field.onChange(value ?? "")}
-                    placeholder="Select advancer"
-                    status={errors.playerId ? "error" : ""}
-                    className="w-full"
-                  />
-                )}
+            name="playerId"
+            render={({ field }) => (
+              <Select
+                allowClear
+                value={field.value || undefined}
+                options={advancerOptions}
+                onChange={(value) => field.onChange(value ?? "")}
+                placeholder="Select advancer"
+                status={errors.playerId ? "error" : ""}
+                className="w-full"
               />
-            </div>
-          ) : null}
+            )}
+          />
           {errors.playerId ? <div className="mt-1 text-xs text-red-600">{errors.playerId.message}</div> : null}
         </div>
 
-        {eventType === "ADVANCE" || eventType === "DEBT_SETTLEMENT" ? (
-          <div>
-            <label className="mb-1 block text-sm font-medium">Amount (VND)</label>
-            <Controller
-              control={control}
-              name="amountVnd"
-              render={({ field }) => (
-                <InputNumber
-                  className="w-full"
-                  min={1}
-                  precision={0}
-                  value={field.value}
-                  formatter={formatAmountVnd}
-                  parser={parseAmountVnd}
-                  addonAfter="VND"
-                  onChange={(value) => field.onChange(typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined)}
-                  status={errors.amountVnd ? "error" : ""}
-                />
-              )}
-            />
-            {errors.amountVnd ? <div className="mt-1 text-xs text-red-600">{errors.amountVnd.message}</div> : null}
-          </div>
-        ) : null}
-
         <div>
-          <label className="mb-1 block text-sm font-medium">Impact mode</label>
+          <label className="mb-1 block text-sm font-medium">Amount (VND)</label>
           <Controller
             control={control}
-            name="impactMode"
-            render={({ field }) => <Select value={field.value} options={impactModeOptions} onChange={field.onChange} className="w-full" />}
+            name="amountVnd"
+            render={({ field }) => (
+              <InputNumber
+                className="w-full"
+                min={1}
+                precision={0}
+                value={field.value}
+                formatter={formatAmountVnd}
+                parser={parseAmountVnd}
+                addonAfter="VND"
+                onChange={(value) => field.onChange(typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined)}
+                status={errors.amountVnd ? "error" : ""}
+              />
+            )}
           />
+          {errors.amountVnd ? <div className="mt-1 text-xs text-red-600">{errors.amountVnd.message}</div> : null}
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Note / reason</label>
-          <Controller
-            control={control}
-            name="note"
-            render={({ field }) => <Input.TextArea {...field} rows={3} status={errors.note ? "error" : ""} />}
-          />
+          <label className="mb-1 block text-sm font-medium">Note</label>
+          <Radio.Group value={notePreset} onChange={(event) => setNotePreset(event.target.value as NotePreset)} optionType="button" buttonStyle="solid">
+            {NOTE_PRESET_OPTIONS.map((option) => (
+              <Radio.Button key={option.value} value={option.value}>
+                {option.label}
+              </Radio.Button>
+            ))}
+          </Radio.Group>
+
+          {notePreset === "OTHER" ? (
+            <Input
+              className="mt-2"
+              placeholder="Nhập nội dung khác"
+              status={errors.note ? "error" : ""}
+              value={noteOther}
+              onChange={(event) => setNoteOther(event.target.value)}
+            />
+          ) : null}
+
           {errors.note ? <div className="mt-1 text-xs text-red-600">{errors.note.message}</div> : null}
         </div>
 

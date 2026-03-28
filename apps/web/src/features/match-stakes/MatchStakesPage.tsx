@@ -845,14 +845,6 @@ export const MatchStakesPage = () => {
     () => (playersQuery.data ?? []).map((player) => ({ label: player.displayName, value: player.id })),
     [playersQuery.data]
   );
-  const historyEventPeriodOptions = useMemo(
-    () =>
-      allPeriods.map((period) => ({
-        value: period.id,
-        label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
-      })),
-    [allPeriods]
-  );
   const selectedTimelineMatchById = useMemo(() => buildTimelineMatchLookup(selectedTimeline), [selectedTimeline]);
   const selectedSettlementLinesById = useMemo(
     () => buildSettlementLineLookup(selectedPeriodDetailQuery.data),
@@ -969,6 +961,10 @@ export const MatchStakesPage = () => {
 
   const openHistoryEventModal = () => {
     if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
+    if (!openPeriodId) {
+      message.warning("No open period. Please create/open a period first.");
       return;
     }
 
@@ -1132,7 +1128,13 @@ export const MatchStakesPage = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
                 Create match
               </Button>
-              <Button onClick={openHistoryEventModal}>Add history event</Button>
+              <Tooltip title={openPeriodId ? "Add advance event to current open period." : "Need an open period to add history event."}>
+                <span>
+                  <Button onClick={openHistoryEventModal} disabled={!openPeriodId}>
+                    Add history event
+                  </Button>
+                </span>
+              </Tooltip>
               {hasOpenPeriod ? (
                 <Tooltip title={canOpenClosePeriod ? "Close this period (requires confirmation in modal)." : "Need at least 1 match to close period."}>
                   <span>
@@ -1422,6 +1424,22 @@ export const MatchStakesPage = () => {
                       );
                     }}
                   />
+
+                  <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
+                    <div className="text-sm font-semibold text-slate-900">{`Init of Period #${periodTimeline.period.periodNo}`}</div>
+                    {periodTimeline.initialRows.length === 0 ? (
+                      <div className="mt-2 text-sm text-slate-500">No players yet.</div>
+                    ) : (
+                      <div className="mt-2 space-y-1">
+                        {sortTimelineRows(periodTimeline.initialRows).map((player) => (
+                          <div key={`${periodTimeline.period.id}-init-${player.playerId}`} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-slate-600">{player.playerName}</span>
+                            <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1452,8 +1470,8 @@ export const MatchStakesPage = () => {
         canWrite={canWriteActions}
         loading={createHistoryEventMutation.isPending}
         apiError={historyEventApiError}
-        defaultPeriodId={selectedPeriodId ?? openPeriodId ?? allPeriods[0]?.id}
-        periodOptions={historyEventPeriodOptions}
+        openPeriodId={openPeriodId}
+        openPeriodNo={currentPeriodQuery.data?.period.periodNo}
         playerOptions={historyEventPlayerOptions}
         onCancel={() => setHistoryEventOpen(false)}
         onSubmit={async (payload: CreateMatchStakesHistoryEventRequest) => {
