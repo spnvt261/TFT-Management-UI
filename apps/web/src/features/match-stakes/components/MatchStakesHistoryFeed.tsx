@@ -194,6 +194,220 @@ const getMatchRowDebtSnapshot = (
   };
 };
 
+type PlayerDebtSnapshot = {
+  beforeVnd: number;
+  afterVnd: number;
+};
+
+type ItemPlayerDebtSnapshotLookup = {
+  byId: Map<string, PlayerDebtSnapshot>;
+  byName: Map<string, PlayerDebtSnapshot>;
+  nameById: Map<string, string>;
+};
+
+const toTimestampMs = (value: string | null | undefined) => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const sortHistoryItemsAscending = (items: MatchStakesHistoryFeedItem[]) => {
+  const next = [...items];
+  next.sort((left, right) => {
+    const postedDiff = toTimestampMs(left.postedAt) - toTimestampMs(right.postedAt);
+    if (postedDiff !== 0) {
+      return postedDiff;
+    }
+
+    const createdDiff = toTimestampMs(left.createdAt) - toTimestampMs(right.createdAt);
+    if (createdDiff !== 0) {
+      return createdDiff;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+
+  return next;
+};
+
+type HistoryItemDeltaRow = {
+  playerId: string | null;
+  playerName: string | null;
+  deltaVnd: number;
+};
+
+const buildHistoryItemDeltaRows = (
+  item: MatchStakesHistoryFeedItem,
+  debtViewMode: "match-only" | "advance-only" | "combined"
+): HistoryItemDeltaRow[] => {
+  if (Array.isArray(item.matchRows) && item.matchRows.length > 0) {
+    return item.matchRows
+      .map((row) => ({
+        playerId: row.playerId ?? null,
+        playerName: row.playerName ?? null,
+        deltaVnd: getMatchRowDebtSnapshot(row, debtViewMode).deltaVnd
+      }))
+      .filter((row) => Number.isFinite(row.deltaVnd) && row.deltaVnd !== 0);
+  }
+
+  const fromPlayerImpacts = (item.playerImpacts ?? [])
+    .map((impact) => ({
+      playerId: toOptionalString(impact.playerId),
+      playerName: toOptionalString(impact.playerName),
+      deltaVnd: resolvePlayerImpactDelta(impact)
+    }))
+    .filter((row): row is HistoryItemDeltaRow => typeof row.deltaVnd === "number" && row.deltaVnd !== 0 && Boolean(row.playerId || row.playerName));
+
+  if (fromPlayerImpacts.length > 0) {
+    return fromPlayerImpacts;
+  }
+
+  const metadataDetails = getAdvanceMetadataDetails(item);
+  const metadataImpactLines = Array.isArray(metadataDetails?.["impactLines"]) ? metadataDetails["impactLines"] : [];
+  const topLevelImpactLines = Array.isArray(item.impactLines) ? item.impactLines : [];
+  const impactLines = topLevelImpactLines.length > 0 ? topLevelImpactLines : metadataImpactLines;
+
+  return impactLines
+    .map((line) => {
+      if (!isRecord(line)) {
+        return null;
+      }
+
+      const linePlayerId = toOptionalString(line["playerId"]);
+      const linePlayerName =
+        toOptionalString(line["playerName"]) ??
+        (linePlayerId ? null : toOptionalString(item.playerName));
+      const lineDelta =
+        toOptionalNumber(line["netDeltaVnd"]) ??
+        (() => {
+          const beforeVnd = toOptionalNumber(line["debtBeforeVnd"]);
+          const afterVnd = toOptionalNumber(line["debtAfterVnd"]);
+          if (beforeVnd === null || afterVnd === null) {
+            return null;
+          }
+          return afterVnd - beforeVnd;
+        })();
+
+      if (lineDelta === null || lineDelta === 0 || (!linePlayerId && !linePlayerName)) {
+        return null;
+      }
+
+      return {
+        playerId: linePlayerId,
+        playerName: linePlayerName,
+        deltaVnd: lineDelta
+      };
+    })
+    .filter((row): row is HistoryItemDeltaRow => row !== null);
+};
+
+const buildItemPlayerDebtSnapshots = (
+  items: MatchStakesHistoryFeedItem[],
+  debtViewMode: "match-only" | "advance-only" | "combined"
+) => {
+  const snapshotsByItemId = new Map<string, ItemPlayerDebtSnapshotLookup>();
+  const runningByPlayerId = new Map<string, { playerName: string; balance: number }>();
+  const runningByPlayerName = new Map<string, { playerName: string; balance: number }>();
+
+  for (const item of sortHistoryItemsAscending(items)) {
+    const beforeByPlayerId = new Map<string, number>();
+    const beforeByPlayerName = new Map<string, number>();
+    for (const [playerId, state] of runningByPlayerId) {
+      beforeByPlayerId.set(playerId, state.balance);
+    }
+    for (const [playerNameKey, state] of runningByPlayerName) {
+      beforeByPlayerName.set(playerNameKey, state.balance);
+    }
+
+    const mergedDeltas = new Map<string, HistoryItemDeltaRow>();
+    for (const row of buildHistoryItemDeltaRows(item, debtViewMode)) {
+      const normalizedName = toOptionalString(row.playerName)?.toLowerCase() ?? null;
+      const key = row.playerId ? `id:${row.playerId}` : normalizedName ? `name:${normalizedName}` : null;
+      if (!key) {
+        continue;
+      }
+
+      const current = mergedDeltas.get(key);
+      if (current) {
+        current.deltaVnd += row.deltaVnd;
+        if (!current.playerId && row.playerId) {
+          current.playerId = row.playerId;
+        }
+        if (!current.playerName && row.playerName) {
+          current.playerName = row.playerName;
+        }
+      } else {
+        mergedDeltas.set(key, {
+          playerId: row.playerId,
+          playerName: row.playerName,
+          deltaVnd: row.deltaVnd
+        });
+      }
+    }
+
+    for (const delta of mergedDeltas.values()) {
+      const normalizedName = toOptionalString(delta.playerName)?.toLowerCase() ?? null;
+
+      if (delta.playerId) {
+        const idState = runningByPlayerId.get(delta.playerId);
+        const nameState = normalizedName ? runningByPlayerName.get(normalizedName) : undefined;
+        const beforeVnd = idState?.balance ?? nameState?.balance ?? 0;
+        const afterVnd = beforeVnd + delta.deltaVnd;
+        const resolvedPlayerName = toOptionalString(delta.playerName) ?? idState?.playerName ?? nameState?.playerName ?? "Player";
+        const previousNameKey = idState?.playerName.toLowerCase();
+        const nextNameKey = resolvedPlayerName.toLowerCase();
+        if (previousNameKey && previousNameKey !== nextNameKey) {
+          runningByPlayerName.delete(previousNameKey);
+        }
+
+        runningByPlayerId.set(delta.playerId, { playerName: resolvedPlayerName, balance: afterVnd });
+        runningByPlayerName.set(nextNameKey, { playerName: resolvedPlayerName, balance: afterVnd });
+        continue;
+      }
+
+      if (normalizedName) {
+        const nameState = runningByPlayerName.get(normalizedName);
+        const beforeVnd = nameState?.balance ?? 0;
+        const afterVnd = beforeVnd + delta.deltaVnd;
+        const resolvedPlayerName = toOptionalString(delta.playerName) ?? nameState?.playerName ?? "Player";
+        runningByPlayerName.set(normalizedName, { playerName: resolvedPlayerName, balance: afterVnd });
+      }
+    }
+
+    const itemSnapshot: ItemPlayerDebtSnapshotLookup = {
+      byId: new Map<string, PlayerDebtSnapshot>(),
+      byName: new Map<string, PlayerDebtSnapshot>(),
+      nameById: new Map<string, string>()
+    };
+
+    for (const [playerId, state] of runningByPlayerId) {
+      const normalizedName = state.playerName.toLowerCase();
+      const beforeVnd = beforeByPlayerId.get(playerId) ?? beforeByPlayerName.get(normalizedName) ?? state.balance;
+      const playerSnapshot: PlayerDebtSnapshot = { beforeVnd, afterVnd: state.balance };
+
+      itemSnapshot.byId.set(playerId, playerSnapshot);
+      itemSnapshot.byName.set(normalizedName, playerSnapshot);
+      itemSnapshot.nameById.set(playerId, state.playerName);
+    }
+
+    for (const [normalizedName, state] of runningByPlayerName) {
+      if (itemSnapshot.byName.has(normalizedName)) {
+        continue;
+      }
+
+      const beforeVnd = beforeByPlayerName.get(normalizedName) ?? state.balance;
+      itemSnapshot.byName.set(normalizedName, { beforeVnd, afterVnd: state.balance });
+    }
+
+    snapshotsByItemId.set(item.id, itemSnapshot);
+  }
+
+  return snapshotsByItemId;
+};
+
 type AdvanceDetailRow = {
   playerId: string | null;
   playerName: string;
@@ -230,7 +444,8 @@ const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
 
 const buildAdvanceDetailRows = (
   item: MatchStakesHistoryFeedItem,
-  debtViewMode: "match-only" | "advance-only" | "combined"
+  debtViewMode: "match-only" | "advance-only" | "combined",
+  itemDebtSnapshots?: ItemPlayerDebtSnapshotLookup | null
 ): AdvanceDetailRow[] => {
   const snapshotByPlayerId = new Map<string, { beforeVnd: number; afterVnd: number }>();
   for (const row of item.matchRows ?? []) {
@@ -263,6 +478,90 @@ const buildAdvanceDetailRows = (
   const impactLines = topLevelImpactLines.length > 0 ? topLevelImpactLines : metadataImpactLines;
   const rowsFromImpactLines: AdvanceDetailRow[] = [];
 
+  if (debtViewMode === "combined" && Array.isArray(item.matchRows) && item.matchRows.length > 0) {
+    const rowsFromCombinedMatchRows = sortAdvanceDetailRowsByName(
+      item.matchRows
+        .filter((row) => getAdvanceCardDelta(row, debtViewMode) !== 0)
+        .map((row) => {
+          const normalizedName = row.playerName.toLowerCase();
+          const combinedSnapshot =
+            (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName);
+          const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
+          const fallbackAfterVnd = getAdvanceCardCumulative(row, debtViewMode);
+          return {
+            playerId: row.playerId,
+            playerName: row.playerName,
+            deltaVnd,
+            beforeVnd: combinedSnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
+            afterVnd: combinedSnapshot?.afterVnd ?? fallbackAfterVnd
+          };
+        })
+    );
+
+    if (rowsFromCombinedMatchRows.length > 0) {
+      return rowsFromCombinedMatchRows;
+    }
+  }
+
+  const resolveCombinedSnapshot = (playerId: string | null, playerName: string | null) => {
+    if (debtViewMode !== "combined" || !itemDebtSnapshots) {
+      return null;
+    }
+
+    if (playerId) {
+      const byId = itemDebtSnapshots.byId.get(playerId);
+      if (byId) {
+        return byId;
+      }
+    }
+
+    const normalizedName = toOptionalString(playerName)?.toLowerCase();
+    if (normalizedName) {
+      return itemDebtSnapshots.byName.get(normalizedName) ?? null;
+    }
+
+    return null;
+  };
+
+  const resolveBeforeAfterFromSources = (
+    playerId: string | null,
+    playerName: string | null,
+    explicitBeforeVnd: number | null,
+    explicitAfterVnd: number | null
+  ) => {
+    const combinedSnapshot = resolveCombinedSnapshot(playerId, playerName);
+    if (combinedSnapshot) {
+      return {
+        beforeVnd: combinedSnapshot.beforeVnd,
+        afterVnd: combinedSnapshot.afterVnd
+      };
+    }
+
+    const snapshot = playerId ? snapshotByPlayerId.get(playerId) : undefined;
+    if (debtViewMode === "combined" && snapshot) {
+      return {
+        beforeVnd: snapshot.beforeVnd,
+        afterVnd: snapshot.afterVnd
+      };
+    }
+
+    return {
+      beforeVnd: explicitBeforeVnd ?? snapshot?.beforeVnd ?? null,
+      afterVnd: explicitAfterVnd ?? snapshot?.afterVnd ?? null
+    };
+  };
+
+  const resolveDisplayName = (playerId: string | null, playerName: string | null) => {
+    if (playerId) {
+      const snapshotName = itemDebtSnapshots?.nameById.get(playerId);
+      if (snapshotName) {
+        return snapshotName;
+      }
+    }
+
+    return toOptionalString(playerName) ?? null;
+  };
+
   for (const impactLine of impactLines) {
     if (!isRecord(impactLine)) {
       continue;
@@ -270,7 +569,9 @@ const buildAdvanceDetailRows = (
 
     const playerId = toOptionalString(impactLine["playerId"]);
     const playerName =
-      toOptionalString(impactLine["playerName"]) ?? (playerId ? playerNameById.get(playerId) ?? null : null) ?? "Player";
+      toOptionalString(impactLine["playerName"]) ??
+      (playerId ? playerNameById.get(playerId) ?? null : null) ??
+      (playerId ? null : toOptionalString(item.playerName));
     const deltaVnd =
       toOptionalNumber(impactLine["netDeltaVnd"]) ??
       (() => {
@@ -282,16 +583,21 @@ const buildAdvanceDetailRows = (
         return afterVnd - beforeVnd;
       })();
 
+    if (!playerId && !playerName) {
+      continue;
+    }
+
+    const explicitBeforeVnd = toOptionalNumber(impactLine["debtBeforeVnd"]);
+    const explicitAfterVnd = toOptionalNumber(impactLine["debtAfterVnd"]);
+    const resolvedBeforeAfter = resolveBeforeAfterFromSources(playerId, playerName, explicitBeforeVnd, explicitAfterVnd);
+    const displayName = resolveDisplayName(playerId, playerName) ?? (playerId ? playerNameById.get(playerId) ?? null : null) ?? "Player";
+
     const candidate = {
       playerId,
-      playerName,
+      playerName: displayName,
       deltaVnd,
-      beforeVnd:
-        toOptionalNumber(impactLine["debtBeforeVnd"]) ??
-        (playerId ? snapshotByPlayerId.get(playerId)?.beforeVnd ?? null : null),
-      afterVnd:
-        toOptionalNumber(impactLine["debtAfterVnd"]) ??
-        (playerId ? snapshotByPlayerId.get(playerId)?.afterVnd ?? null : null)
+      beforeVnd: resolvedBeforeAfter.beforeVnd,
+      afterVnd: resolvedBeforeAfter.afterVnd
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -307,16 +613,25 @@ const buildAdvanceDetailRows = (
 
   const rowsFromPlayerImpacts: AdvanceDetailRow[] = [];
   for (const impact of item.playerImpacts ?? []) {
+    const impactPlayerId = toOptionalString(impact.playerId);
+    const impactPlayerName = toOptionalString(impact.playerName) ?? (impactPlayerId ? playerNameById.get(impactPlayerId) ?? null : null);
+    if (!impactPlayerId && !impactPlayerName) {
+      continue;
+    }
+
+    const resolvedBeforeAfter = resolveBeforeAfterFromSources(
+      impactPlayerId,
+      impactPlayerName,
+      toOptionalNumber(impact.debtBeforeVnd),
+      toOptionalNumber(impact.debtAfterVnd)
+    );
+
     const candidate = {
-      playerId: impact.playerId ?? null,
-      playerName: impact.playerName ?? "Player",
+      playerId: impactPlayerId,
+      playerName: resolveDisplayName(impactPlayerId, impactPlayerName) ?? impactPlayerName ?? "Player",
       deltaVnd: resolvePlayerImpactDelta(impact),
-      beforeVnd:
-        toOptionalNumber(impact.debtBeforeVnd) ??
-        (impact.playerId ? snapshotByPlayerId.get(impact.playerId)?.beforeVnd ?? null : null),
-      afterVnd:
-        toOptionalNumber(impact.debtAfterVnd) ??
-        (impact.playerId ? snapshotByPlayerId.get(impact.playerId)?.afterVnd ?? null : null)
+      beforeVnd: resolvedBeforeAfter.beforeVnd,
+      afterVnd: resolvedBeforeAfter.afterVnd
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -363,13 +678,23 @@ const buildAdvanceDetailRows = (
   const rowsFromMatchRows = sortAdvanceDetailRowsByName(
     item.matchRows
     .filter((row) => getAdvanceCardDelta(row, debtViewMode) !== 0)
-    .map((row) => ({
-      playerId: row.playerId,
-      playerName: row.playerName,
-      deltaVnd: getAdvanceCardDelta(row, debtViewMode),
-      beforeVnd: getAdvanceCardCumulative(row, debtViewMode) - getAdvanceCardDelta(row, debtViewMode),
-      afterVnd: getAdvanceCardCumulative(row, debtViewMode)
-    }))
+    .map((row) => {
+      const normalizedName = row.playerName.toLowerCase();
+      const combinedSnapshot =
+        debtViewMode === "combined"
+          ? (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName)
+          : null;
+      const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
+      const fallbackAfterVnd = getAdvanceCardCumulative(row, debtViewMode);
+
+      return {
+        playerId: row.playerId,
+        playerName: row.playerName,
+        deltaVnd,
+        beforeVnd: combinedSnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
+        afterVnd: combinedSnapshot?.afterVnd ?? fallbackAfterVnd
+      };
+    })
   );
 
   if (rowsFromMatchRows.length > 0) {
@@ -453,7 +778,8 @@ const buildAdvancePlayerSlots = (items: MatchStakesHistoryFeedItem[]): AdvancePl
 
 const buildAdvanceSlotFallback = (
   item: MatchStakesHistoryFeedItem,
-  debtViewMode: "match-only" | "advance-only" | "combined"
+  debtViewMode: "match-only" | "advance-only" | "combined",
+  itemDebtSnapshots?: ItemPlayerDebtSnapshotLookup | null
 ): AdvanceSlotFallback => {
   const fallback: AdvanceSlotFallback = {
     byId: new Map<string, AdvanceDetailRow>(),
@@ -461,12 +787,20 @@ const buildAdvanceSlotFallback = (
   };
 
   for (const row of item.matchRows ?? []) {
+    const normalizedName = row.playerName.toLowerCase();
+    const combinedSnapshot =
+      debtViewMode === "combined"
+        ? (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName)
+        : null;
+    const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
+    const fallbackAfterVnd = getAdvanceCardCumulative(row, debtViewMode);
+
     const detailRow: AdvanceDetailRow = {
       playerId: row.playerId ?? null,
       playerName: row.playerName,
-      deltaVnd: getAdvanceCardDelta(row, debtViewMode),
-      beforeVnd: getAdvanceCardCumulative(row, debtViewMode) - getAdvanceCardDelta(row, debtViewMode),
-      afterVnd: getAdvanceCardCumulative(row, debtViewMode)
+      deltaVnd,
+      beforeVnd: combinedSnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
+      afterVnd: combinedSnapshot?.afterVnd ?? fallbackAfterVnd
     };
 
     if (row.playerId) {
@@ -474,6 +808,39 @@ const buildAdvanceSlotFallback = (
     }
 
     fallback.byName.set(row.playerName.toLowerCase(), detailRow);
+  }
+
+  if (itemDebtSnapshots) {
+    for (const [playerId, snapshot] of itemDebtSnapshots.byId.entries()) {
+      if (fallback.byId.has(playerId)) {
+        continue;
+      }
+
+      const playerName = itemDebtSnapshots.nameById.get(playerId) ?? "Player";
+      const detailRow: AdvanceDetailRow = {
+        playerId,
+        playerName,
+        deltaVnd: snapshot.afterVnd - snapshot.beforeVnd,
+        beforeVnd: snapshot.beforeVnd,
+        afterVnd: snapshot.afterVnd
+      };
+      fallback.byId.set(playerId, detailRow);
+      fallback.byName.set(playerName.toLowerCase(), detailRow);
+    }
+
+    for (const [normalizedName, snapshot] of itemDebtSnapshots.byName.entries()) {
+      if (fallback.byName.has(normalizedName)) {
+        continue;
+      }
+
+      fallback.byName.set(normalizedName, {
+        playerId: null,
+        playerName: normalizedName,
+        deltaVnd: snapshot.afterVnd - snapshot.beforeVnd,
+        beforeVnd: snapshot.beforeVnd,
+        afterVnd: snapshot.afterVnd
+      });
+    }
   }
 
   return fallback;
@@ -529,7 +896,11 @@ const alignAdvanceRowsWithSlots = (
     }
 
     if (matched) {
-      return matched;
+      return {
+        ...matched,
+        playerId: slot.playerId ?? matched.playerId,
+        playerName: slot.playerName
+      };
     }
 
     const fallbackDetail =
@@ -632,6 +1003,8 @@ export const MatchStakesHistoryFeed = ({
   }
 
   const advancePlayerSlots = buildAdvancePlayerSlots(items);
+  const itemDebtSnapshotsById =
+    debtViewMode === "combined" ? buildItemPlayerDebtSnapshots(items, debtViewMode) : null;
 
   return (
     <div className="flex flex-wrap gap-2.5">
@@ -642,11 +1015,12 @@ export const MatchStakesHistoryFeed = ({
         const hasMatchRows = itemType === "MATCH" && Array.isArray(item.matchRows) && item.matchRows.length > 0;
         const sortedMatchRows = hasMatchRows ? sortMatchRows(item.matchRows ?? []) : [];
         const advanceNoteTag = itemType === "ADVANCE" ? item.note?.trim() ?? null : null;
+        const itemDebtSnapshots = itemDebtSnapshotsById?.get(item.id) ?? null;
         const rawAdvanceDetailRows =
-          itemType === "ADVANCE" ? buildAdvanceDetailRows(item, debtViewMode) : [];
+          itemType === "ADVANCE" ? buildAdvanceDetailRows(item, debtViewMode, itemDebtSnapshots) : [];
         const advanceSlotFallback =
           itemType === "ADVANCE"
-            ? buildAdvanceSlotFallback(item, debtViewMode)
+            ? buildAdvanceSlotFallback(item, debtViewMode, itemDebtSnapshots)
             : { byId: new Map<string, AdvanceDetailRow>(), byName: new Map<string, AdvanceDetailRow>() };
         const advanceDetailRows =
           itemType === "ADVANCE"
@@ -656,6 +1030,8 @@ export const MatchStakesHistoryFeed = ({
         const canResetAdvance = itemType === "ADVANCE" && item.eventStatus === "ACTIVE" && !!onRequestResetAdvance;
         const advanceHeadlineLabel =
           itemType === "ADVANCE" && itemAmount !== null ? `${item.playerName ?? "Player"}: ${formatVnd(Math.abs(itemAmount))}` : null;
+        const shouldShowReasonLine = itemType !== "MATCH" && itemType !== "ADVANCE" && Boolean(item.reason);
+        const shouldShowNoteLine = itemType !== "MATCH" && itemType !== "ADVANCE" && Boolean(item.note);
 
         return (
           <div
@@ -738,10 +1114,10 @@ export const MatchStakesHistoryFeed = ({
                 {itemType === "ADVANCE" && !advanceHeadlineLabel ? <div className="text-sm font-semibold text-slate-900">{item.playerName ?? "Player"}</div> : null}
                 {itemType === "ADVANCE" && resetLabel ? <div className="text-xs text-rose-600">{resetLabel}</div> : null}
                 {!hasMatchRows && itemType !== "ADVANCE" && item.playerName ? <div className="text-sm text-slate-700">{item.playerName}</div> : null}
-                {item.reason ? <div className="text-xs text-slate-500">{item.reason}</div> : null}
-                {itemType !== "ADVANCE" && item.note ? <div className="text-xs text-slate-500">{item.note}</div> : null}
+                {shouldShowReasonLine ? <div className="text-xs text-slate-500">{item.reason}</div> : null}
+                {shouldShowNoteLine ? <div className="text-xs text-slate-500">{item.note}</div> : null}
               </div>
-              {itemAmount !== null && itemType !== "ADVANCE" ? (
+              {itemAmount !== null && itemType !== "ADVANCE" && itemType !== "MATCH" ? (
                 <div
                   className={`text-sm font-semibold ${getAmountClassName(itemAmount)}`}
                 >

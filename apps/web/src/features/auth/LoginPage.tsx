@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button, Card, Input, Typography } from "antd";
+import { ArrowLeftOutlined, EyeInvisibleOutlined, EyeOutlined } from "@ant-design/icons";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { FormApiError } from "@/components/common/FormApiError";
 import { useAuth } from "@/features/auth/AuthContext";
@@ -37,6 +38,15 @@ export const LoginPage = () => {
 
     return "/match-stakes";
   }, [location.state, searchParams]);
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate(redirectTarget, { replace: true });
+  };
 
   if (role === "ADMIN") {
     return <Navigate to={redirectTarget} replace />;
@@ -82,18 +92,25 @@ export const LoginPage = () => {
 
           <div>
             <label className="mb-1 block text-sm font-medium">Access code</label>
-            <Input
+            <Input.Password
               value={accessCode}
               onChange={(event) => setAccessCode(event.target.value)}
               placeholder="Enter access code"
               size="large"
               autoFocus
+              visibilityToggle
+              iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
             />
           </div>
 
-          <Button type="primary" htmlType="submit" size="large" block loading={isSubmitting} disabled={!accessCode.trim()}>
-            Login
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button icon={<ArrowLeftOutlined />} size="large" onClick={handleBack}>
+              Back
+            </Button>
+            <Button type="primary" htmlType="submit" size="large" className="flex-1" loading={isSubmitting} disabled={!accessCode.trim()}>
+              Login
+            </Button>
+          </div>
         </form>
       </Card>
     </div>

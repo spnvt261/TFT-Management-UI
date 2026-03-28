@@ -6,7 +6,6 @@ import { cn } from "@/lib/cn";
 
 const navItems = [
   { to: "/match-stakes", label: "Match Stakes", activePrefixes: ["/match-stakes"] },
-  { to: "/group-fund/fund", label: "Group Fund", activePrefixes: ["/group-fund"] },
   { to: "/rules", label: "Rules" },
   { to: "/players", label: "Players" },
   { to: "/settings", label: "Settings" }
