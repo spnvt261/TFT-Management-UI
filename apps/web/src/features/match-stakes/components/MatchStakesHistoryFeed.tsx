@@ -60,6 +60,16 @@ const getPlacementClassName = (row: DebtPeriodTimelinePlayerRowDto) => {
   return "text-slate-500";
 };
 
+const isMatchParticipantRow = (row: DebtPeriodTimelinePlayerRowDto) => {
+  const rank = getPlacementRank(row);
+  if (typeof rank === "number") {
+    return true;
+  }
+
+  const placementLabel = row.placementLabel?.trim();
+  return Boolean(placementLabel && placementLabel !== "-");
+};
+
 const sortMatchRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
   const next = [...rows];
   next.sort((left, right) => left.playerName.localeCompare(right.playerName));
@@ -752,9 +762,15 @@ export const MatchStakesHistoryFeed = ({
                   const debtBeforeVnd = debtSnapshot.beforeVnd;
                   const debtDeltaVnd = debtSnapshot.deltaVnd;
                   const debtDeltaLabel = getRowDeltaLabel(matchHistoryMode);
+                  const isParticipant = isMatchParticipantRow(row);
 
                   return (
-                    <div key={`${item.id}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                    <div
+                      key={`${item.id}-${row.playerId}`}
+                      className={`rounded-md border px-2.5 py-1.5 ${
+                        isParticipant ? "border-slate-200 bg-slate-50" : "border-gray-300 bg-gray-200"
+                      }`}
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 text-xs font-medium text-slate-800">{row.playerName}</div>
                         <div className={`text-sm font-semibold ${getAmountClassName(debtAfterVnd)}`}>
