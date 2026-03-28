@@ -1451,25 +1451,31 @@ export const MatchStakesPage = () => {
             <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
           ) : (
             <div className="space-y-2.5">
-              {sortedCurrentDebtPlayers.map((player) => (
-                <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.displayOutstandingVnd)}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-base font-semibold text-slate-900">{player.playerName}</div>
-                    <div className={`text-2xl font-bold lg:text-3xl ${getOutstandingClassName(player.displayOutstandingVnd)}`}>
-                      {formatSignedVnd(player.displayOutstandingVnd)}
+              {sortedCurrentDebtPlayers.map((player) => {
+                const initNetVnd = player.initNetVnd ?? 0;
+                const totalAdvancedVnd = player.advanceBucketNetVnd > 0 ? player.advanceBucketNetVnd : 0;
+                const totalToRepayVnd = player.advanceBucketNetVnd < 0 ? Math.abs(player.advanceBucketNetVnd) : 0;
+
+                return (
+                  <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.displayOutstandingVnd)}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-base font-semibold text-slate-900">{player.playerName}</div>
+                      <div className={`text-2xl font-bold lg:text-3xl ${getOutstandingClassName(player.displayOutstandingVnd)}`}>
+                        {formatSignedVnd(player.displayOutstandingVnd)}
+                      </div>
                     </div>
+                    {currentDebtViewMode === "match-only" ? (
+                      <div className="mt-1 text-[11px] text-slate-500">{`Init: ${formatSignedVnd(initNetVnd)} | Match net: ${formatSignedVnd(player.matchBucketNetVnd)}`}</div>
+                    ) : null}
+                    {currentDebtViewMode === "advance-only" ? (
+                      <div className="mt-1 text-[11px] text-slate-500">{`Total advanced: ${formatVnd(totalAdvancedVnd)} | Total to repay: ${formatVnd(totalToRepayVnd)}`}</div>
+                    ) : null}
+                    {currentDebtViewMode === "combined" ? (
+                      <div className="mt-1 text-[11px] text-slate-500">{`Init: ${formatSignedVnd(initNetVnd)} | Match net: ${formatSignedVnd(player.matchBucketNetVnd)} | Advance: ${formatSignedVnd(player.advanceBucketNetVnd)}`}</div>
+                    ) : null}
                   </div>
-                  {currentDebtViewMode === "match-only" ? (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Match+Init net ${formatSignedVnd(player.matchWithInitBucketNetVnd)} | Match net ${formatSignedVnd(player.matchBucketNetVnd)} | Init ${formatSignedVnd(player.initNetVnd ?? 0)}`}</div>
-                  ) : null}
-                  {currentDebtViewMode === "advance-only" ? (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Advance net ${formatSignedVnd(player.advanceBucketNetVnd)} | Accrued advance ${formatVnd(player.accruedAdvanceNetVnd ?? 0)}`}</div>
-                  ) : null}
-                  {currentDebtViewMode === "combined" ? (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Combined net ${formatSignedVnd(player.combinedBucketNetVnd)} | Outstanding ${formatSignedVnd(player.outstandingCombinedBucketNetVnd)} | Paid ${formatVnd(player.settledPaidVnd)} | Received ${formatVnd(player.settledReceivedVnd)}`}</div>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </SectionCard>
