@@ -7,7 +7,7 @@ export const historyEventSchema = z
     playerId: z.string().optional().or(z.literal("")),
     amountVnd: z.number().int("Amount must be an integer").nonnegative("Amount must be non-negative").optional(),
     note: z.string().trim().min(1, "Note is required").max(400, "Note can be up to 400 characters"),
-    impactMode: z.enum(["AFFECTS_DEBT", "INFORMATION_ONLY"])
+    impactMode: z.enum(["AFFECTS_DEBT", "INFORMATIONAL"])
   })
   .superRefine((value, ctx) => {
     if (value.eventType === "ADVANCE" && !value.playerId) {

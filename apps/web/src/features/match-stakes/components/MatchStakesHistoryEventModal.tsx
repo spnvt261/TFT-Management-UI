@@ -31,7 +31,7 @@ const eventTypeOptions = [
 
 const impactModeOptions = [
   { value: "AFFECTS_DEBT", label: "Affects debt" },
-  { value: "INFORMATION_ONLY", label: "Informational only" }
+  { value: "INFORMATIONAL", label: "Informational only" }
 ];
 
 export const MatchStakesHistoryEventModal = ({

@@ -78,7 +78,7 @@ type MatchStakesHistoryEventV2Payload =
       playerId: string;
       amountVnd: number;
       note?: string | null;
-      impactMode?: "AFFECTS_DEBT" | "INFORMATION_ONLY";
+      impactMode?: "AFFECTS_DEBT" | "INFORMATIONAL";
       debtPeriodId?: string;
     }
   | {

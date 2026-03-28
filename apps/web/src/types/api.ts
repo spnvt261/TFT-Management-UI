@@ -680,7 +680,7 @@ export interface DebtPeriodTimelineApiDto {
 }
 
 export type MatchStakesHistoryEventType = "MATCH" | "DEBT_SETTLEMENT" | "ADVANCE" | "NOTE";
-export type MatchStakesHistoryImpactMode = "AFFECTS_DEBT" | "INFORMATION_ONLY";
+export type MatchStakesHistoryImpactMode = "AFFECTS_DEBT" | "INFORMATIONAL";
 
 export interface MatchStakesHistorySettlementLineDto {
   payerPlayerId: string;
