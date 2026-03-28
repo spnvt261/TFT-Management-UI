@@ -600,9 +600,9 @@ export const MatchStakesCreatePage = () => {
 
       <section className="relative grid grid-cols-1 gap-3 xl:grid-cols-[420px_1fr]">
         {createMutation.isPending ? (
-          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/60 backdrop-blur-[1px]">
-            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-              <Spin size="large" tip="Creating match..." />
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-transparent">
+            <div className="rounded-lg bg-transparent px-4 py-3">
+              <Spin size="large" tip="Creating match..." className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
             </div>
           </div>
         ) : null}
@@ -629,8 +629,8 @@ export const MatchStakesCreatePage = () => {
 
           <div className="relative w-full max-w-[360px]">
             {isLoadingRules ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/70 backdrop-blur-[1px]">
-                <Spin size="large" />
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-transparent">
+                <Spin size="large" className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
               </div>
             ) : null}
             <label className="mb-1 block text-sm font-medium">Rule</label>
@@ -723,9 +723,9 @@ export const MatchStakesCreatePage = () => {
           <SectionCard title="Participants">
             <div className="relative">
               {isParticipantsLoading ? (
-                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/70 backdrop-blur-[1px]">
-                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                    <Spin size="large" />
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-transparent">
+                  <div className="rounded-lg bg-transparent px-4 py-3">
+                    <Spin size="large" className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
                     {isCalculatingSettlement ? <div className="mt-2 text-xs text-slate-600">Calculating win/loss...</div> : null}
                   </div>
                 </div>
