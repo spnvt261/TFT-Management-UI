@@ -67,6 +67,7 @@ type CloseBalanceDraft = Record<string, number>;
 type CurrentDebtDisplayPlayer = DebtPeriodPlayerSummaryDto & {
   displayOutstandingVnd: number;
   matchBucketNetVnd: number;
+  matchWithInitBucketNetVnd: number;
   advanceBucketNetVnd: number;
   combinedBucketNetVnd: number;
   outstandingCombinedBucketNetVnd: number;
@@ -178,7 +179,7 @@ const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
 };
 
 const resolveMatchBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
-  getFirstFiniteNumber(player.matchNetVnd, player.accruedMatchNetVnd, player.accruedNetVnd);
+  getFirstFiniteNumber(player.matchNetVnd, player.accruedMatchNetVnd, 0);
 
 const resolveAdvanceBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
   getFirstFiniteNumber(player.advanceNetVnd, player.accruedAdvanceNetVnd, 0);
@@ -194,9 +195,40 @@ const resolveCombinedBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
 const resolveOutstandingCombinedBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) =>
   getFirstFiniteNumber(player.outstandingCombinedNetVnd, player.outstandingNetVnd, resolveCombinedBucketNetVnd(player));
 
+const resolveMatchWithInitBucketNetVnd = (player: DebtPeriodPlayerSummaryDto) => {
+  const initNetVnd = getFirstFiniteNumber(player.initNetVnd, 0);
+
+  if (typeof player.matchNetVnd === "number" && Number.isFinite(player.matchNetVnd)) {
+    return player.matchNetVnd + initNetVnd;
+  }
+
+  if (typeof player.accruedMatchNetVnd === "number" && Number.isFinite(player.accruedMatchNetVnd)) {
+    return player.accruedMatchNetVnd + initNetVnd;
+  }
+
+  const combinedCandidate =
+    typeof player.combinedNetVnd === "number" && Number.isFinite(player.combinedNetVnd)
+      ? player.combinedNetVnd
+      : typeof player.accruedCombinedNetVnd === "number" && Number.isFinite(player.accruedCombinedNetVnd)
+        ? player.accruedCombinedNetVnd
+        : null;
+  const advanceCandidate =
+    typeof player.advanceNetVnd === "number" && Number.isFinite(player.advanceNetVnd)
+      ? player.advanceNetVnd
+      : typeof player.accruedAdvanceNetVnd === "number" && Number.isFinite(player.accruedAdvanceNetVnd)
+        ? player.accruedAdvanceNetVnd
+        : null;
+
+  if (combinedCandidate !== null && advanceCandidate !== null) {
+    return combinedCandidate - advanceCandidate + initNetVnd;
+  }
+
+  return getFirstFiniteNumber(player.accruedNetVnd, 0) + initNetVnd;
+};
+
 const getDebtValueByMode = (player: DebtPeriodPlayerSummaryDto, mode: CurrentDebtViewMode) => {
   if (mode === "match-only") {
-    return resolveMatchBucketNetVnd(player);
+    return resolveMatchWithInitBucketNetVnd(player);
   }
 
   if (mode === "advance-only") {
@@ -884,6 +916,7 @@ export const MatchStakesPage = () => {
 
     return players.map((player) => {
       const matchBucketNetVnd = resolveMatchBucketNetVnd(player);
+      const matchWithInitBucketNetVnd = resolveMatchWithInitBucketNetVnd(player);
       const advanceBucketNetVnd = resolveAdvanceBucketNetVnd(player);
       const combinedBucketNetVnd = resolveCombinedBucketNetVnd(player);
       const outstandingCombinedBucketNetVnd = resolveOutstandingCombinedBucketNetVnd(player);
@@ -892,6 +925,7 @@ export const MatchStakesPage = () => {
         ...player,
         displayOutstandingVnd: getDebtValueByMode(player, currentDebtViewMode),
         matchBucketNetVnd,
+        matchWithInitBucketNetVnd,
         advanceBucketNetVnd,
         combinedBucketNetVnd,
         outstandingCombinedBucketNetVnd
@@ -1426,7 +1460,7 @@ export const MatchStakesPage = () => {
                     </div>
                   </div>
                   {currentDebtViewMode === "match-only" ? (
-                    <div className="mt-1 text-[11px] text-slate-500">{`Match net ${formatSignedVnd(player.matchBucketNetVnd)} | Accrued match ${formatVnd(player.accruedMatchNetVnd ?? 0)}`}</div>
+                    <div className="mt-1 text-[11px] text-slate-500">{`Match+Init net ${formatSignedVnd(player.matchWithInitBucketNetVnd)} | Match net ${formatSignedVnd(player.matchBucketNetVnd)} | Init ${formatSignedVnd(player.initNetVnd ?? 0)}`}</div>
                   ) : null}
                   {currentDebtViewMode === "advance-only" ? (
                     <div className="mt-1 text-[11px] text-slate-500">{`Advance net ${formatSignedVnd(player.advanceBucketNetVnd)} | Accrued advance ${formatVnd(player.accruedAdvanceNetVnd ?? 0)}`}</div>
