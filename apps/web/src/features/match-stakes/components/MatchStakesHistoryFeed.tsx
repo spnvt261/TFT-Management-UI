@@ -503,8 +503,8 @@ const buildAdvanceDetailRows = (
     }
   }
 
-  const resolveCombinedSnapshot = (playerId: string | null, playerName: string | null) => {
-    if (debtViewMode !== "combined" || !itemDebtSnapshots) {
+  const resolveHistorySnapshot = (playerId: string | null, playerName: string | null) => {
+    if (!itemDebtSnapshots) {
       return null;
     }
 
@@ -529,11 +529,11 @@ const buildAdvanceDetailRows = (
     explicitBeforeVnd: number | null,
     explicitAfterVnd: number | null
   ) => {
-    const combinedSnapshot = resolveCombinedSnapshot(playerId, playerName);
-    if (combinedSnapshot) {
+    const historySnapshot = resolveHistorySnapshot(playerId, playerName);
+    if (historySnapshot) {
       return {
-        beforeVnd: combinedSnapshot.beforeVnd,
-        afterVnd: combinedSnapshot.afterVnd
+        beforeVnd: historySnapshot.beforeVnd,
+        afterVnd: historySnapshot.afterVnd
       };
     }
 
@@ -680,10 +680,8 @@ const buildAdvanceDetailRows = (
     .filter((row) => getAdvanceCardDelta(row, debtViewMode) !== 0)
     .map((row) => {
       const normalizedName = row.playerName.toLowerCase();
-      const combinedSnapshot =
-        debtViewMode === "combined"
-          ? (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName)
-          : null;
+      const historySnapshot =
+        (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName);
       const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
       const fallbackAfterVnd = getAdvanceCardCumulative(row, debtViewMode);
 
@@ -691,8 +689,8 @@ const buildAdvanceDetailRows = (
         playerId: row.playerId,
         playerName: row.playerName,
         deltaVnd,
-        beforeVnd: combinedSnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
-        afterVnd: combinedSnapshot?.afterVnd ?? fallbackAfterVnd
+        beforeVnd: historySnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
+        afterVnd: historySnapshot?.afterVnd ?? fallbackAfterVnd
       };
     })
   );
@@ -788,10 +786,8 @@ const buildAdvanceSlotFallback = (
 
   for (const row of item.matchRows ?? []) {
     const normalizedName = row.playerName.toLowerCase();
-    const combinedSnapshot =
-      debtViewMode === "combined"
-        ? (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName)
-        : null;
+    const historySnapshot =
+      (row.playerId ? itemDebtSnapshots?.byId.get(row.playerId) : undefined) ?? itemDebtSnapshots?.byName.get(normalizedName);
     const deltaVnd = getAdvanceCardDelta(row, debtViewMode);
     const fallbackAfterVnd = getAdvanceCardCumulative(row, debtViewMode);
 
@@ -799,8 +795,8 @@ const buildAdvanceSlotFallback = (
       playerId: row.playerId ?? null,
       playerName: row.playerName,
       deltaVnd,
-      beforeVnd: combinedSnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
-      afterVnd: combinedSnapshot?.afterVnd ?? fallbackAfterVnd
+      beforeVnd: historySnapshot?.beforeVnd ?? fallbackAfterVnd - deltaVnd,
+      afterVnd: historySnapshot?.afterVnd ?? fallbackAfterVnd
     };
 
     if (row.playerId) {
@@ -1004,7 +1000,9 @@ export const MatchStakesHistoryFeed = ({
 
   const advancePlayerSlots = buildAdvancePlayerSlots(items);
   const itemDebtSnapshotsById =
-    debtViewMode === "combined" ? buildItemPlayerDebtSnapshots(items, debtViewMode) : null;
+    debtViewMode === "combined" || debtViewMode === "advance-only"
+      ? buildItemPlayerDebtSnapshots(items, debtViewMode)
+      : null;
 
   return (
     <div className="flex flex-wrap gap-2.5">
