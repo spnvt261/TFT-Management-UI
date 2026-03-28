@@ -32,7 +32,7 @@ export interface PaginatedResult<T> {
 
 export type RoleCode = "ADMIN" | "USER";
 
-export interface LoginRequest {
+export interface AdminAccessCodeLoginRequest {
   accessCode: string;
 }
 

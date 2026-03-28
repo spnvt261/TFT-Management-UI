@@ -53,7 +53,7 @@ export const SettingsPage = () => {
 
   const handleLogout = () => {
     logout();
-    navigate("/login", { replace: true });
+    navigate("/match-stakes", { replace: true });
   };
 
   const currentRoleUi = role ? roleUi[role] : null;
@@ -119,9 +119,19 @@ export const SettingsPage = () => {
             </div>
           </div>
 
-          <Button danger onClick={handleLogout}>
-            Logout
-          </Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {role !== "ADMIN" ? (
+              <Button type="primary" onClick={() => navigate("/login", { state: { from: "/settings" } })}>
+                Login as Admin
+              </Button>
+            ) : null}
+            {
+              role === "ADMIN" && <Button danger={role === "ADMIN"} onClick={handleLogout}>
+              {role === "ADMIN" ? "Switch to User Mode" : "Reset Session"}
+            </Button>
+            }
+            
+          </div>
         </div>
       </SectionCard>
     </PageContainer>

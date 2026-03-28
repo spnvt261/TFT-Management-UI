@@ -1,9 +1,10 @@
-import axios, { AxiosHeaders } from "axios";
-import type { AxiosError, AxiosRequestConfig } from "axios";
+import axios, { AxiosError, AxiosHeaders } from "axios";
+import type { AxiosRequestConfig, InternalAxiosRequestConfig } from "axios";
 import { message } from "antd";
 import { env } from "@/lib/env";
 import { getErrorMessage } from "@/lib/error-messages";
-import { clearAuthSession, getAuthSession } from "@/features/auth/session";
+import { getAuthSession } from "@/features/auth/session";
+import { fallbackToUserSession, loginAsUserSilently } from "@/features/auth/authSessionManager";
 import type { ApiErrorResponse, ApiSuccessResponse, PaginatedResult } from "@/types/api";
 import type { AppError } from "@/types/error";
 
@@ -17,6 +18,13 @@ export const httpClient = axios.create({
   baseURL: normalizeBaseUrl(env.apiBaseUrl),
   timeout: 15_000
 });
+
+type AuthRetryConfig = InternalAxiosRequestConfig & {
+  _authRecovered?: boolean;
+};
+
+const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const READ_METHODS = new Set(["GET", "HEAD"]);
 
 const resolveRequestPath = (url?: string) => {
   if (!url) {
@@ -34,9 +42,47 @@ const resolveRequestPath = (url?: string) => {
   return url;
 };
 
-const isPublicEndpoint = (url?: string) => {
+const isAuthEndpoint = (url?: string) => {
   const path = resolveRequestPath(url);
-  return path === "/" || path.endsWith("/health") || path.endsWith("/auth/login");
+  return path.endsWith("/auth/login") || path.endsWith("/auth/check-access-code");
+};
+
+const getMethod = (config?: AxiosRequestConfig) => (config?.method ?? "get").toUpperCase();
+const isWriteMethod = (config?: AxiosRequestConfig) => WRITE_METHODS.has(getMethod(config));
+const isReadMethod = (config?: AxiosRequestConfig) => READ_METHODS.has(getMethod(config));
+
+const createClientForbiddenError = (config: InternalAxiosRequestConfig) =>
+  new AxiosError<ApiErrorResponse>(
+    "Admin access is required for write actions.",
+    "AUTH_FORBIDDEN",
+    config,
+    undefined,
+    {
+      status: 403,
+      statusText: "Forbidden",
+      headers: {},
+      config,
+      data: {
+        success: false,
+        error: {
+          code: "AUTH_FORBIDDEN",
+          message: "Admin access is required for write actions."
+        }
+      }
+    }
+  );
+
+const notifyOnce = (signature: string, level: "error" | "warning", content: string, key: string) => {
+  if (!shouldNotifyApiError(signature)) {
+    return;
+  }
+
+  const fn = level === "warning" ? message.warning : message.error;
+  fn({
+    content,
+    key,
+    duration: 4
+  });
 };
 
 export const toAppError = (error: unknown): AppError => {
@@ -101,11 +147,12 @@ const notifyApiError = (error: unknown) => {
 };
 
 httpClient.interceptors.request.use((config) => {
-  if (isPublicEndpoint(config.url)) {
-    return config;
+  const session = getAuthSession();
+  if (isWriteMethod(config) && !isAuthEndpoint(config.url) && session.role !== "ADMIN") {
+    return Promise.reject(createClientForbiddenError(config));
   }
 
-  const token = getAuthSession().accessToken;
+  const token = session.accessToken;
   if (!token) {
     return config;
   }
@@ -119,44 +166,73 @@ httpClient.interceptors.request.use((config) => {
 
 httpClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
+
+    if (!axios.isAxiosError(error)) {
+      notifyApiError(error);
+      return Promise.reject(error);
+    }
+
+    const requestConfig = error.config as AuthRetryConfig | undefined;
+    if (isAuthEndpoint(requestConfig?.url)) {
       return Promise.reject(error);
     }
 
     const appError = toAppError(error);
     const isUnauthorized = appError.status === 401 || appError.code === "AUTH_UNAUTHORIZED";
     if (isUnauthorized) {
-      clearAuthSession();
+      if (requestConfig && !requestConfig._authRecovered) {
+        requestConfig._authRecovered = true;
+        const roleBeforeRecovery = getAuthSession().role;
 
-      const signature = `${appError.status}|AUTH_UNAUTHORIZED|session-expired`;
-      if (shouldNotifyApiError(signature)) {
-        message.error({
-          content: "Session expired or invalid token. Please login again.",
-          key: "auth-unauthorized",
-          duration: 4
-        });
+        try {
+          if (roleBeforeRecovery === "ADMIN") {
+            await fallbackToUserSession();
+
+            notifyOnce(
+              "401|AUTH_ADMIN_EXPIRED|fallback-user",
+              "warning",
+              "Admin session expired. Switched to USER mode. Login as Admin again from Settings for write actions.",
+              "auth-admin-expired"
+            );
+
+            if (isWriteMethod(requestConfig)) {
+              return Promise.reject(error);
+            }
+          } else {
+            await loginAsUserSilently();
+          }
+
+          return httpClient(requestConfig);
+        } catch {
+          notifyOnce(
+            "401|AUTH_RECOVERY_FAILED|public-mode",
+            "warning",
+            "Session refresh failed. Continuing in public read mode.",
+            "auth-recovery-failed"
+          );
+          return Promise.reject(error);
+        }
       }
 
-      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-        const from = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        const query = from ? `?from=${encodeURIComponent(from)}` : "";
-        window.location.assign(`/login${query}`);
-      }
-
+      notifyOnce("401|AUTH_UNAUTHORIZED|retry-failed", "warning", "Session expired or invalid token.", "auth-unauthorized");
       return Promise.reject(error);
     }
 
     const isForbidden = appError.status === 403 || appError.code === "AUTH_FORBIDDEN";
     if (isForbidden) {
-      const signature = `${appError.status}|AUTH_FORBIDDEN|permission-denied`;
-      if (shouldNotifyApiError(signature)) {
-        message.warning({
-          content: "You do not have permission for this action.",
-          key: "auth-forbidden",
-          duration: 4
-        });
-      }
+      const signature = `${appError.status}|AUTH_FORBIDDEN|permission-denied|${isReadMethod(requestConfig) ? "read" : "write"}`;
+      notifyOnce(
+        signature,
+        "warning",
+        isWriteMethod(requestConfig)
+          ? "Admin access required for write actions. Use Settings -> Login as Admin."
+          : "You do not have permission for this action.",
+        "auth-forbidden"
+      );
 
       return Promise.reject(error);
     }

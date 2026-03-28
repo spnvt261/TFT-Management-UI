@@ -18,7 +18,7 @@ export const LoginPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isAuthenticated, login } = useAuth();
+  const { role, loginAsAdmin } = useAuth();
 
   const [accessCode, setAccessCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,7 +38,7 @@ export const LoginPage = () => {
     return "/match-stakes";
   }, [location.state, searchParams]);
 
-  if (isAuthenticated) {
+  if (role === "ADMIN") {
     return <Navigate to={redirectTarget} replace />;
   }
 
@@ -48,9 +48,9 @@ export const LoginPage = () => {
         <div className="mb-6 space-y-1">
           <Typography.Text className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700">TFT2</Typography.Text>
           <Typography.Title level={3} className="!mb-0">
-            Login
+            Admin Login
           </Typography.Title>
-          <Typography.Text type="secondary">Enter your access code to continue.</Typography.Text>
+          <Typography.Text type="secondary">Enter admin access code to unlock management actions.</Typography.Text>
         </div>
 
         <form
@@ -64,10 +64,15 @@ export const LoginPage = () => {
             setIsSubmitting(true);
             setFormError(null);
             try {
-              await login(accessCode);
+              await loginAsAdmin(accessCode);
               navigate(redirectTarget, { replace: true });
             } catch (error) {
-              setFormError(getErrorMessage(toAppError(error)));
+              const appError = toAppError(error);
+              if (appError.code === "AUTH_ACCESS_CODE_INVALID") {
+                setFormError("Wrong access code");
+              } else {
+                setFormError(getErrorMessage(appError));
+              }
             } finally {
               setIsSubmitting(false);
             }

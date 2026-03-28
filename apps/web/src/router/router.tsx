@@ -1,7 +1,7 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { AppShellLayout } from "@/components/layout/AppShellLayout";
 import { RouteErrorBoundary } from "@/router/RouteErrorBoundary";
-import { ProtectedRoute, RequireAdminRoute } from "@/router/ProtectedRoute";
+import { RequireAdminRoute } from "@/router/ProtectedRoute";
 import DashboardRoute from "@/pages/DashboardRoute";
 import MatchStakesRoute from "@/pages/MatchStakesRoute";
 import MatchStakesCreateRoute from "@/pages/MatchStakesCreateRoute";
@@ -29,11 +29,7 @@ export const router = createBrowserRouter([
   },
   {
     path: "/",
-    element: (
-      <ProtectedRoute>
-        <AppShellLayout />
-      </ProtectedRoute>
-    ),
+    element: <AppShellLayout />,
     errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Navigate to="/match-stakes" replace /> },

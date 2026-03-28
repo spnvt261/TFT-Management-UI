@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { authApi } from "@/api/authApi";
-import { clearAuthSession, getAuthSession, setAuthSession, subscribeAuthSession } from "@/features/auth/session";
+import { clearAuthSession, getAuthSession, subscribeAuthSession } from "@/features/auth/session";
+import { bootstrapAuthSession, fallbackToUserSession, loginAsAdmin } from "@/features/auth/authSessionManager";
 import type { LoginResponseDto, RoleCode } from "@/types/api";
 
 interface AuthContextValue {
   accessToken: string | null;
   role: RoleCode | null;
+  isBootstrapping: boolean;
   isAuthenticated: boolean;
-  login: (accessCode: string) => Promise<LoginResponseDto>;
+  loginAsAdmin: (accessCode: string) => Promise<LoginResponseDto>;
   logout: () => void;
   hasRole: (role: RoleCode) => boolean;
   canWrite: () => boolean;
@@ -18,21 +19,31 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState(getAuthSession());
+  const [isBootstrapping, setIsBootstrapping] = useState(() => !(session.accessToken && session.role));
 
   useEffect(() => subscribeAuthSession(setSession), []);
 
-  const login = useCallback(async (accessCode: string) => {
-    const result = await authApi.login({ accessCode: accessCode.trim() });
-    setAuthSession({
-      accessToken: result.accessToken,
-      role: result.role
+  useEffect(() => {
+    let active = true;
+
+    void bootstrapAuthSession().finally(() => {
+      if (active) {
+        setIsBootstrapping(false);
+      }
     });
 
-    return result;
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleAdminLogin = useCallback(async (accessCode: string) => {
+    return loginAsAdmin(accessCode);
   }, []);
 
   const logout = useCallback(() => {
     clearAuthSession();
+    void fallbackToUserSession();
   }, []);
 
   const hasRole = useCallback(
@@ -44,20 +55,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const canWrite = useCallback(() => session.role === "ADMIN", [session.role]);
 
-  const canRead = useCallback(() => session.role === "ADMIN" || session.role === "USER", [session.role]);
+  const canRead = useCallback(() => true, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       accessToken: session.accessToken,
       role: session.role,
+      isBootstrapping,
       isAuthenticated: Boolean(session.accessToken && session.role),
-      login,
+      loginAsAdmin: handleAdminLogin,
       logout,
       hasRole,
       canWrite,
       canRead
     }),
-    [canRead, canWrite, hasRole, login, logout, session.accessToken, session.role]
+    [canRead, canWrite, handleAdminLogin, hasRole, isBootstrapping, logout, session.accessToken, session.role]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
