@@ -62,15 +62,7 @@ const getPlacementClassName = (row: DebtPeriodTimelinePlayerRowDto) => {
 
 const sortMatchRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
   const next = [...rows];
-  next.sort((left, right) => {
-    const leftRank = getPlacementRank(left) ?? Number.MAX_SAFE_INTEGER;
-    const rightRank = getPlacementRank(right) ?? Number.MAX_SAFE_INTEGER;
-    if (leftRank !== rightRank) {
-      return leftRank - rightRank;
-    }
-
-    return left.playerName.localeCompare(right.playerName);
-  });
+  next.sort((left, right) => left.playerName.localeCompare(right.playerName));
 
   return next;
 };
@@ -94,7 +86,17 @@ const getMatchRowDelta = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFinite
 const getAdvanceRowDelta = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.advanceDeltaVnd, 0);
 const getCombinedRowDelta = (row: DebtPeriodTimelinePlayerRowDto) =>
   getFirstFiniteNumber(row.combinedDeltaVnd, row.matchNetVnd, getMatchRowDelta(row) + getAdvanceRowDelta(row));
-const getMatchRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.cumulativeMatchNetVnd, row.cumulativeNetVnd);
+const getMatchRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) => {
+  const combinedCumulative = toOptionalNumber(row.cumulativeCombinedNetVnd) ?? toOptionalNumber(row.cumulativeNetVnd);
+  const advanceCumulative = toOptionalNumber(row.cumulativeAdvanceNetVnd);
+
+  if (combinedCumulative !== null && advanceCumulative !== null) {
+    // Keep initial carry-forward inside match timeline projection.
+    return combinedCumulative - advanceCumulative;
+  }
+
+  return getFirstFiniteNumber(row.cumulativeMatchNetVnd, combinedCumulative, row.cumulativeNetVnd);
+};
 const getAdvanceRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) => getFirstFiniteNumber(row.cumulativeAdvanceNetVnd, 0);
 const getCombinedRowCumulative = (row: DebtPeriodTimelinePlayerRowDto) =>
   getFirstFiniteNumber(
@@ -178,12 +180,35 @@ type AdvanceDetailRow = {
   playerId: string | null;
   playerName: string;
   deltaVnd: number;
+  beforeVnd: number | null;
+  afterVnd: number | null;
 };
 
-const isAdvanceDetailRow = (row: { playerId: string | null; playerName: string; deltaVnd: number | null }): row is AdvanceDetailRow =>
-  typeof row.deltaVnd === "number";
+const isAdvanceDetailRow = (row: {
+  playerId: string | null;
+  playerName: string;
+  deltaVnd: number | null;
+  beforeVnd?: number | null;
+  afterVnd?: number | null;
+}): row is AdvanceDetailRow => typeof row.deltaVnd === "number";
+
+const sortAdvanceDetailRowsByName = (rows: AdvanceDetailRow[]) => {
+  const next = [...rows];
+  next.sort((left, right) => left.playerName.localeCompare(right.playerName));
+  return next;
+};
 
 const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetailRow[] => {
+  const combinedSnapshotByPlayerId = new Map<string, { beforeVnd: number; afterVnd: number }>();
+  for (const row of item.matchRows ?? []) {
+    const afterVnd = getCombinedRowCumulative(row);
+    const deltaVnd = getCombinedRowDelta(row);
+    combinedSnapshotByPlayerId.set(row.playerId, {
+      beforeVnd: afterVnd - deltaVnd,
+      afterVnd
+    });
+  }
+
   const playerNameById = new Map<string, string>();
   for (const impact of item.playerImpacts ?? []) {
     const playerId = toOptionalString(impact.playerId);
@@ -227,7 +252,13 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
     const candidate = {
       playerId,
       playerName,
-      deltaVnd
+      deltaVnd,
+      beforeVnd:
+        toOptionalNumber(impactLine["debtBeforeVnd"]) ??
+        (playerId ? combinedSnapshotByPlayerId.get(playerId)?.beforeVnd ?? null : null),
+      afterVnd:
+        toOptionalNumber(impactLine["debtAfterVnd"]) ??
+        (playerId ? combinedSnapshotByPlayerId.get(playerId)?.afterVnd ?? null : null)
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -238,7 +269,7 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
   }
 
   if (rowsFromImpactLines.length > 0) {
-    return rowsFromImpactLines;
+    return sortAdvanceDetailRowsByName(rowsFromImpactLines);
   }
 
   const rowsFromPlayerImpacts: AdvanceDetailRow[] = [];
@@ -246,7 +277,13 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
     const candidate = {
       playerId: impact.playerId ?? null,
       playerName: impact.playerName ?? "Player",
-      deltaVnd: resolvePlayerImpactDelta(impact)
+      deltaVnd: resolvePlayerImpactDelta(impact),
+      beforeVnd:
+        toOptionalNumber(impact.debtBeforeVnd) ??
+        (impact.playerId ? combinedSnapshotByPlayerId.get(impact.playerId)?.beforeVnd ?? null : null),
+      afterVnd:
+        toOptionalNumber(impact.debtAfterVnd) ??
+        (impact.playerId ? combinedSnapshotByPlayerId.get(impact.playerId)?.afterVnd ?? null : null)
     };
 
     if (!isAdvanceDetailRow(candidate) || candidate.deltaVnd === 0) {
@@ -257,20 +294,24 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
   }
 
   if (rowsFromPlayerImpacts.length > 0) {
-    return rowsFromPlayerImpacts;
+    return sortAdvanceDetailRowsByName(rowsFromPlayerImpacts);
   }
 
   if (!Array.isArray(item.matchRows)) {
     return [];
   }
 
-  return item.matchRows
+  return sortAdvanceDetailRowsByName(
+    item.matchRows
     .filter((row) => getCombinedRowDelta(row) !== 0)
     .map((row) => ({
       playerId: row.playerId,
       playerName: row.playerName,
-      deltaVnd: getCombinedRowDelta(row)
-    }));
+      deltaVnd: getCombinedRowDelta(row),
+      beforeVnd: getCombinedRowCumulative(row) - getCombinedRowDelta(row),
+      afterVnd: getCombinedRowCumulative(row)
+    }))
+  );
 };
 
 const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
@@ -360,6 +401,9 @@ const getRowDeltaLabel = (debtViewMode: "match-only" | "advance-only" | "combine
 
   return "Combined";
 };
+
+const resolveMatchHistoryMode = (debtViewMode: "match-only" | "advance-only" | "combined") =>
+  debtViewMode === "combined" ? "combined" : "match-only";
 
 export const MatchStakesHistoryFeed = ({
   items,
@@ -489,11 +533,12 @@ export const MatchStakesHistoryFeed = ({
             {hasMatchRows ? (
               <div className="mt-2 space-y-1.5">
                 {sortedMatchRows.map((row) => {
-                  const debtSnapshot = getMatchRowDebtSnapshot(row, debtViewMode);
+                  const matchHistoryMode = resolveMatchHistoryMode(debtViewMode);
+                  const debtSnapshot = getMatchRowDebtSnapshot(row, matchHistoryMode);
                   const debtAfterVnd = debtSnapshot.afterVnd;
                   const debtBeforeVnd = debtSnapshot.beforeVnd;
                   const debtDeltaVnd = debtSnapshot.deltaVnd;
-                  const debtDeltaLabel = getRowDeltaLabel(debtViewMode);
+                  const debtDeltaLabel = getRowDeltaLabel(matchHistoryMode);
 
                   return (
                     <div key={`${item.id}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
@@ -519,15 +564,23 @@ export const MatchStakesHistoryFeed = ({
             {itemType === "ADVANCE" ? (
               <div className="mt-2 space-y-1.5 text-[11px] text-slate-500">
                 {advanceDetailRows.map((row, index) => {
-                  const isReceive = row.deltaVnd > 0;
+                  const afterVnd = row.afterVnd ?? row.deltaVnd;
+                  const beforeVnd = row.beforeVnd ?? (afterVnd - row.deltaVnd);
                   return (
                     <div key={`${item.id}-advance-${row.playerId ?? index}`} className="rounded-md border border-slate-200 bg-slate-50/80 px-2.5 py-1.5">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className="text-slate-700">{row.playerName}</span>
-                        <span className={isReceive ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>
-                          {isReceive ? `+${formatVnd(row.deltaVnd)}` : `-${formatVnd(Math.abs(row.deltaVnd))}`}
-                        </span>
-                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 text-xs font-medium text-slate-800">{row.playerName}</div>
+                        <div className={`text-sm font-semibold ${getAmountClassName(afterVnd)}`}>
+                          {formatSignedAmount(afterVnd)}
+                        </div>
+                      </div>
+                      {viewMode === "detail" ? (
+                        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                          <span className={getAmountClassName(row.deltaVnd)}>{`Advance: ${formatSignedAmount(row.deltaVnd)}`}</span>
+                          <span>{`Before: ${formatSignedAmount(beforeVnd)}`}</span>
+                          <span>{`After: ${formatSignedAmount(afterVnd)}`}</span>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

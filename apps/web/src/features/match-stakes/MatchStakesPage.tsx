@@ -134,6 +134,12 @@ const sortByNetAmount = <T extends { playerName: string }>(items: T[], getAmount
   return next;
 };
 
+const sortByPlayerNameAsc = <T extends { playerName: string }>(items: T[]) => {
+  const next = [...items];
+  next.sort((left, right) => left.playerName.localeCompare(right.playerName));
+  return next;
+};
+
 const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
   for (const value of values) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -866,10 +872,9 @@ export const MatchStakesPage = () => {
     });
   }, [activeTimeline?.players, currentDebtViewMode]);
   const sortedCurrentDebtPlayers = useMemo(
-    () => sortByNetAmount(currentDebtPlayers, (player) => player.displayOutstandingVnd),
+    () => sortByPlayerNameAsc(currentDebtPlayers),
     [currentDebtPlayers]
   );
-  const hasCombinedOnlyInitialBalance = activeSummary?.initialBalanceDecomposition === "COMBINED_ONLY";
   const initialPlayers = useMemo(
     () => sortTimelineRows(activeTimeline?.initialRows ?? []),
     [activeTimeline?.initialRows]
@@ -1380,13 +1385,6 @@ export const MatchStakesPage = () => {
             <EmptyState title="No players in this period yet" description="Create matches to start accumulating debt." />
           ) : (
             <div className="space-y-2.5">
-              {hasCombinedOnlyInitialBalance && currentDebtViewMode !== "combined" ? (
-                <Alert
-                  type="info"
-                  showIcon
-                  message="Initial carry-forward is COMBINED_ONLY. Match/Advance views exclude unsplit opening balance."
-                />
-              ) : null}
               {sortedCurrentDebtPlayers.map((player) => (
                 <div key={player.playerId} className={`rounded-xl border p-3.5 shadow-sm ${getDebtCardToneClassName(player.displayOutstandingVnd)}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
