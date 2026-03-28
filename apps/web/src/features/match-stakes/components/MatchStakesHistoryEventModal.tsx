@@ -300,6 +300,7 @@ export const MatchStakesHistoryEventModal = ({
                 className="w-full"
                 min={1}
                 precision={0}
+                step={10000}
                 value={field.value}
                 formatter={formatAmountVnd}
                 parser={parseAmountVnd}

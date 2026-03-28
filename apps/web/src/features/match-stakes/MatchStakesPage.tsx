@@ -140,6 +140,33 @@ const sortByPlayerNameAsc = <T extends { playerName: string }>(items: T[]) => {
   return next;
 };
 
+const formatCloseBalanceInputValue = (value: string | number | undefined) => {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  const numericValue = typeof value === "number" ? value : Number(String(value).replace(/[^\d-]/g, ""));
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  return Math.trunc(numericValue).toLocaleString("en-US");
+};
+
+const parseCloseBalanceInputValue = (value: string | undefined) => {
+  if (!value) {
+    return 0;
+  }
+
+  const normalized = value.replace(/[^\d-]/g, "");
+  if (!normalized || normalized === "-") {
+    return 0;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
   for (const value of values) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -1039,14 +1066,19 @@ export const MatchStakesPage = () => {
   const canCloseWithMatch = (closeSummary?.totalMatches ?? 0) >= 1;
   const canOpenClosePeriod = canWriteActions && Boolean(closePeriodTargetId) && canCloseWithMatch;
   const expectedCloseConfirmText = closePeriod ? `Close Period ${closePeriod.periodNo}` : "";
-  const canConfirmClosePeriod =
-    canCloseWithMatch && Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
   const canConfirmResetAdvance =
     Boolean(resetAdvanceTarget) && resetAdvanceTarget?.itemType === "ADVANCE" && resetAdvanceTarget?.eventStatus === "ACTIVE";
   const closingBalances = closeBalanceRows.map((player) => ({
     playerId: player.playerId,
     netVnd: Math.trunc(player.draftNetVnd)
   }));
+  const closeBalanceTotalNetVnd = closingBalances.reduce((sum, balance) => sum + balance.netVnd, 0);
+  const isCloseBalanceTotalValid = closeBalanceTotalNetVnd === 0;
+  const canConfirmClosePeriod =
+    canCloseWithMatch &&
+    isCloseBalanceTotalValid &&
+    Boolean(expectedCloseConfirmText) &&
+    closePeriodConfirmText.trim() === expectedCloseConfirmText;
 
   const openSettlementModal = () => {
     if (!guardWritePermission(canWriteActions)) {
@@ -1991,10 +2023,17 @@ export const MatchStakesPage = () => {
           {!canCloseWithMatch ? <Alert type="warning" showIcon message="Cannot close period with no matches. Need at least 1 match." /> : null}
           {hasOutstanding ? <Alert type="info" showIcon message="Non-zero balances will be sent as closingBalances for rollover." /> : null}
           {!hasOutstanding ? <Alert type="success" showIcon message="All balances are zero. This period closes with a clean rollover." /> : null}
+          {!isCloseBalanceTotalValid ? (
+            <Alert
+              type="error"
+              showIcon
+              message={`Initial balances total must be 0 VND (current: ${closeBalanceTotalNetVnd.toLocaleString("en-US")} VND).`}
+            />
+          ) : null}
 
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-slate-900">Init cua period moi (closingBalances)</div>
+              <div className="text-sm font-semibold text-slate-900">Initial balances for next period (closingBalances)</div>
               <Button
                 size="small"
                 onClick={() => {
@@ -2018,10 +2057,13 @@ export const MatchStakesPage = () => {
                       precision={0}
                       step={10000}
                       className="w-[170px]"
+                      formatter={formatCloseBalanceInputValue}
+                      parser={parseCloseBalanceInputValue}
+                      addonAfter="VND"
                       onChange={(value) =>
                         setCloseBalanceDraft((previous) => ({
                           ...previous,
-                          [player.playerId]: typeof value === "number" ? value : 0
+                          [player.playerId]: typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0
                         }))
                       }
                     />
@@ -2029,6 +2071,9 @@ export const MatchStakesPage = () => {
                 ))}
               </div>
             )}
+            <div className="mt-2 text-right text-xs font-medium text-slate-600">
+              {`Total init: ${closeBalanceTotalNetVnd.toLocaleString("en-US")} VND`}
+            </div>
           </div>
 
           <div>
