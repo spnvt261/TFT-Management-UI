@@ -623,6 +623,8 @@ export const MatchStakesHistoryFeed = ({
   const visibleItems =
     debtViewMode === "advance-only"
       ? items.filter((item) => normalizeHistoryItemType(item) === "ADVANCE")
+      : debtViewMode === "match-only"
+        ? items.filter((item) => normalizeHistoryItemType(item) !== "ADVANCE")
       : items;
 
   if (visibleItems.length === 0) {
