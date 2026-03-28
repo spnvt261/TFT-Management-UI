@@ -1329,6 +1329,7 @@ export const MatchStakesPage = () => {
               <MatchStakesHistoryFeed
                 items={selectedPeriodHistoryItems}
                 viewMode={historyViewMode}
+                debtViewMode={currentDebtViewMode}
                 onRequestResetAdvance={canWriteActions ? openResetAdvanceModal : undefined}
                 resettingEventId={resetHistoryEventMutation.isPending ? resetAdvanceTarget?.id ?? null : null}
                 emptyTitle="No history in this period yet"
@@ -1405,6 +1406,7 @@ export const MatchStakesPage = () => {
                   <MatchStakesHistoryFeed
                     items={feedItems}
                     viewMode={historyViewMode}
+                    debtViewMode={currentDebtViewMode}
                     onRequestResetAdvance={canWriteActions ? openResetAdvanceModal : undefined}
                     resettingEventId={resetHistoryEventMutation.isPending ? resetAdvanceTarget?.id ?? null : null}
                     onOpenMatch={(item) => {
