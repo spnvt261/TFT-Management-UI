@@ -29,7 +29,8 @@ export const groupFundTransactionLabels: Record<GroupFundTransactionType, string
   CONTRIBUTION: "Contribution",
   WITHDRAWAL: "Withdrawal",
   ADJUSTMENT_IN: "Adjustment In",
-  ADJUSTMENT_OUT: "Adjustment Out"
+  ADJUSTMENT_OUT: "Adjustment Out",
+  FUND_ADVANCE: "Fund Advance"
 };
 
 export const debtPeriodStatusLabels: Record<DebtPeriodStatus, string> = {

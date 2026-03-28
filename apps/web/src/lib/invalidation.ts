@@ -8,6 +8,7 @@ export const invalidateAfterMatchCreate = async (queryClient: QueryClient, modul
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "summary"] }),
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "ledger"] }),
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "matches"] }),
+      queryClient.invalidateQueries({ queryKey: ["match-stakes", "history"] }),
       queryClient.invalidateQueries({ queryKey: ["match-stakes", "debt-periods"] })
     ]);
   }
@@ -16,7 +17,10 @@ export const invalidateAfterMatchCreate = async (queryClient: QueryClient, modul
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["group-fund", "summary"] }),
       queryClient.invalidateQueries({ queryKey: ["group-fund", "ledger"] }),
-      queryClient.invalidateQueries({ queryKey: ["group-fund", "matches"] })
+      queryClient.invalidateQueries({ queryKey: ["group-fund", "matches"] }),
+      queryClient.invalidateQueries({ queryKey: ["group-fund", "history"] }),
+      queryClient.invalidateQueries({ queryKey: ["group-fund", "transactions"] }),
+      queryClient.invalidateQueries({ queryKey: ["group-fund", "withdrawals"] })
     ]);
   }
 
@@ -47,6 +51,8 @@ export const invalidateAfterGroupFundTransaction = async (queryClient: QueryClie
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ["group-fund", "summary"] }),
     queryClient.invalidateQueries({ queryKey: ["group-fund", "ledger"] }),
+    queryClient.invalidateQueries({ queryKey: ["group-fund", "history"] }),
+    queryClient.invalidateQueries({ queryKey: ["group-fund", "matches"] }),
     queryClient.invalidateQueries({ queryKey: ["group-fund", "transactions"] }),
     queryClient.invalidateQueries({ queryKey: ["group-fund", "withdrawals"] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.overview })

@@ -25,8 +25,10 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { guardWritePermission } from "@/features/auth/permissions";
 import {
   useCreateGroupFundContribution,
+  useCreateGroupFundAdvance,
   useCreateGroupFundTransaction,
   useCreateGroupFundWithdrawal,
+  useGroupFundHistory,
   useGroupFundLedger,
   useGroupFundMatches,
   useGroupFundSummary,
@@ -41,6 +43,8 @@ import {
   type ManualTransactionValues,
   type WithdrawalValues
 } from "@/features/group-fund/schemas";
+import { GroupFundHistoryFeed, type GroupFundHistoryFeedItem } from "@/features/group-fund/components/GroupFundHistoryFeed";
+import { GroupFundAdvanceModal } from "@/features/group-fund/components/GroupFundAdvanceModal";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
 import { useActivePlayers } from "@/features/players/hooks";
 import { getErrorMessage } from "@/lib/error-messages";
@@ -49,12 +53,16 @@ import { groupFundTransactionLabels } from "@/lib/labels";
 import type { GroupFundSummaryDto, GroupFundTransactionType } from "@/types/api";
 
 type HistoryViewMode = "minimal" | "detail";
+type FundHistoryMode = "unified" | "both" | "detailed";
 type GroupFundPlayerSummary = GroupFundSummaryDto["players"][number];
 
 const DEFAULT_PAGE_SIZE = 12;
 const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.group-fund.history.view-mode";
 const OBLIGATIONS_VISIBLE_STORAGE_KEY = "tft2.group-fund.obligations.visible";
 const DEFAULT_HISTORY_VIEW_MODE: HistoryViewMode = "minimal";
+const DEFAULT_FUND_HISTORY_MODE: FundHistoryMode = "unified";
+
+const toMillis = (iso: string) => Date.parse(iso);
 
 const toIsoValue = (value: Dayjs | null) => (value ? value.toISOString() : undefined);
 
@@ -124,6 +132,7 @@ export const GroupFundPage = () => {
 
     return window.localStorage.getItem(OBLIGATIONS_VISIBLE_STORAGE_KEY) !== "false";
   });
+  const [fundHistoryMode, setFundHistoryMode] = useState<FundHistoryMode>(DEFAULT_FUND_HISTORY_MODE);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [from, setFrom] = useState<string>();
@@ -146,6 +155,8 @@ export const GroupFundPage = () => {
   const [withdrawalApiError, setWithdrawalApiError] = useState<string | null>(null);
   const [transactionOpen, setTransactionOpen] = useState(false);
   const [transactionApiError, setTransactionApiError] = useState<string | null>(null);
+  const [fundAdvanceOpen, setFundAdvanceOpen] = useState(false);
+  const [fundAdvanceApiError, setFundAdvanceApiError] = useState<string | null>(null);
 
   const summaryQuery = useGroupFundSummary({ from, to });
   const withdrawalsQuery = useGroupFundWithdrawals({ from, to, playerId, page: withdrawalPage, pageSize: DEFAULT_PAGE_SIZE });
@@ -159,11 +170,19 @@ export const GroupFundPage = () => {
     page: transactionPage,
     pageSize: DEFAULT_PAGE_SIZE
   });
+  const unifiedHistoryQuery = useGroupFundHistory({
+    from,
+    to,
+    playerId,
+    page: 1,
+    pageSize: 100
+  });
   const playersQuery = useActivePlayers();
 
   const createContributionMutation = useCreateGroupFundContribution();
   const createWithdrawalMutation = useCreateGroupFundWithdrawal();
   const createTransactionMutation = useCreateGroupFundTransaction();
+  const createFundAdvanceMutation = useCreateGroupFundAdvance();
 
   const {
     control: contributionControl,
@@ -256,6 +275,102 @@ export const GroupFundPage = () => {
   );
   const totalContributedVnd = sortedObligations.reduce((sum, player) => sum + player.totalContributedVnd, 0);
   const totalPrepaidVnd = sortedObligations.reduce((sum, player) => sum + resolvePrepaidVnd(player), 0);
+
+  const fundAdvanceRows = useMemo(() => {
+    const summaryAdvanceRows = summaryQuery.data?.fundAdvances ?? [];
+    if (summaryAdvanceRows.length > 0) {
+      return summaryAdvanceRows
+        .map((row) => ({
+          playerId: row.playerId,
+          playerName: row.playerName,
+          advancedVnd: row.advancedVnd,
+          outstandingVnd: row.outstandingVnd ?? Math.max(row.advancedVnd - (row.reimbursedVnd ?? 0), 0)
+        }))
+        .filter((row) => row.advancedVnd > 0 || row.outstandingVnd > 0);
+    }
+
+    return (summaryQuery.data?.players ?? [])
+      .filter((player) => (player.totalFundAdvanceVnd ?? 0) > 0 || (player.outstandingFundAdvanceVnd ?? 0) > 0)
+      .map((player) => ({
+        playerId: player.playerId,
+        playerName: player.playerName,
+        advancedVnd: player.totalFundAdvanceVnd ?? 0,
+        outstandingVnd: player.outstandingFundAdvanceVnd ?? 0
+      }));
+  }, [summaryQuery.data?.fundAdvances, summaryQuery.data?.players]);
+
+  const totalFundAdvanceVnd =
+    summaryQuery.data?.totalFundAdvanceVnd ??
+    fundAdvanceRows.reduce((sum, row) => sum + Math.max(row.advancedVnd, 0), 0);
+  const outstandingFundAdvanceVnd =
+    summaryQuery.data?.outstandingFundAdvanceVnd ??
+    fundAdvanceRows.reduce((sum, row) => sum + Math.max(row.outstandingVnd, 0), 0);
+
+  const fallbackHistoryItems = useMemo<GroupFundHistoryFeedItem[]>(() => {
+    const matchItems: GroupFundHistoryFeedItem[] = (matchesQuery.data?.data ?? []).map((matchItem) => ({
+      id: `match:${matchItem.id}`,
+      itemType: "MATCH",
+      postedAt: matchItem.playedAt,
+      matchId: matchItem.id,
+      amountVnd: matchItem.totalFundInVnd - matchItem.totalFundOutVnd,
+      note: matchItem.notePreview ?? null,
+      fundInVnd: matchItem.totalFundInVnd,
+      fundOutVnd: matchItem.totalFundOutVnd,
+      matchTitle: `${matchItem.ruleSetName} (v${matchItem.ruleSetVersionNo})`
+    }));
+
+    const transactionItems: GroupFundHistoryFeedItem[] = (transactionsQuery.data?.data ?? []).map((item) => ({
+      id: `transaction:${item.entryId}`,
+      itemType: item.transactionType,
+      postedAt: item.postedAt,
+      playerId: item.playerId,
+      playerName: item.playerName,
+      actorName: item.playerName,
+      amountVnd: item.transactionType === "WITHDRAWAL" || item.transactionType === "ADJUSTMENT_OUT" ? -item.amountVnd : item.amountVnd,
+      note: item.reason,
+      reason: item.reason,
+      transactionType: item.transactionType
+    }));
+
+    return [...matchItems, ...transactionItems].sort((left, right) => {
+      const diff = toMillis(right.postedAt) - toMillis(left.postedAt);
+      if (diff !== 0) {
+        return diff;
+      }
+
+      return right.id.localeCompare(left.id);
+    });
+  }, [matchesQuery.data?.data, transactionsQuery.data?.data]);
+
+  const unifiedHistoryItems = useMemo<GroupFundHistoryFeedItem[]>(() => {
+    const backendData = unifiedHistoryQuery.data?.data;
+    if (Array.isArray(backendData)) {
+      return [...backendData]
+        .map((item) => ({
+          ...item,
+          matchTitle: item.itemType === "MATCH" ? item.note ?? "Match" : undefined
+        }))
+        .sort((left, right) => {
+          const diff = toMillis(right.postedAt) - toMillis(left.postedAt);
+          if (diff !== 0) {
+            return diff;
+          }
+
+          const rightCreated = right.createdAt ? toMillis(right.createdAt) : 0;
+          const leftCreated = left.createdAt ? toMillis(left.createdAt) : 0;
+          if (rightCreated !== leftCreated) {
+            return rightCreated - leftCreated;
+          }
+
+          return right.id.localeCompare(left.id);
+        });
+    }
+
+    return fallbackHistoryItems;
+  }, [fallbackHistoryItems, unifiedHistoryQuery.data]);
+
+  const showUnifiedHistory = fundHistoryMode !== "detailed";
+  const showDetailedHistorySections = fundHistoryMode !== "unified";
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -354,6 +469,15 @@ export const GroupFundPage = () => {
     setTransactionOpen(true);
   };
 
+  const openFundAdvanceModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
+
+    setFundAdvanceApiError(null);
+    setFundAdvanceOpen(true);
+  };
+
   const activeFilterSummary = [
     from ? `From: ${formatDateTime(from)}` : "From: All time",
     to ? `To: ${formatDateTime(to)}` : "To: Now",
@@ -392,6 +516,7 @@ export const GroupFundPage = () => {
           {canWriteActions ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={() => openContributionModal()}>Mark paid</Button>
+              <Button onClick={openFundAdvanceModal}>Record fund advance</Button>
               <Button onClick={openWithdrawalModal}>Withdraw from fund</Button>
               <Button onClick={openTransactionModal}>Manual transaction</Button>
             </div>
@@ -416,7 +541,7 @@ export const GroupFundPage = () => {
             <Skeleton active paragraph={{ rows: 2 }} />
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">Total matches</div>
               <div className="mt-1 text-base font-semibold text-slate-900">{summaryQuery.data?.totalMatches ?? 0}</div>
@@ -437,8 +562,34 @@ export const GroupFundPage = () => {
               <div className="text-xs text-slate-500">Total prepaid credit</div>
               <div className="mt-1 text-base font-semibold text-emerald-700">{formatVnd(totalPrepaidVnd)}</div>
             </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Fund advances</div>
+              <div className="mt-1 text-base font-semibold text-slate-900">{formatVnd(totalFundAdvanceVnd)}</div>
+            </div>
           </div>
         )}
+
+        <div className="mt-3 space-y-2">
+          <Alert
+            type={(summaryQuery.data?.fundBalanceVnd ?? 0) < 0 ? "warning" : "info"}
+            showIcon
+            message={`Balance can be negative. Current ${formatVnd(summaryQuery.data?.fundBalanceVnd ?? 0)} | Outstanding fund advances ${formatVnd(outstandingFundAdvanceVnd)}`}
+          />
+
+          {fundAdvanceRows.length > 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Players who advanced fund money</div>
+              <div className="mt-2 space-y-1.5">
+                {fundAdvanceRows.map((row) => (
+                  <div key={row.playerId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <div className="font-medium text-slate-800">{row.playerName}</div>
+                    <div className="text-xs text-slate-600">{`Advanced ${formatVnd(row.advancedVnd)} | Outstanding ${formatVnd(row.outstandingVnd)}`}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <SectionCard
@@ -523,6 +674,29 @@ export const GroupFundPage = () => {
         description="Apply filters once and review all history sections below."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex overflow-hidden rounded-lg border border-slate-200">
+              <Button
+                size="small"
+                type={fundHistoryMode === "unified" ? "primary" : "text"}
+                onClick={() => setFundHistoryMode("unified")}
+              >
+                Unified
+              </Button>
+              <Button
+                size="small"
+                type={fundHistoryMode === "both" ? "primary" : "text"}
+                onClick={() => setFundHistoryMode("both")}
+              >
+                Both
+              </Button>
+              <Button
+                size="small"
+                type={fundHistoryMode === "detailed" ? "primary" : "text"}
+                onClick={() => setFundHistoryMode("detailed")}
+              >
+                Detailed
+              </Button>
+            </div>
             <Tooltip title="Filter fund history">
               <Button icon={<FilterOutlined />} onClick={openFilterModal} />
             </Tooltip>
@@ -547,7 +721,32 @@ export const GroupFundPage = () => {
         </div>
       </SectionCard>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      {showUnifiedHistory ? (
+        <SectionCard
+          title="Fund History"
+          description="Unified chronological feed across match-generated movements, manual transactions, and fund advances."
+          actions={canWriteActions ? <Button onClick={openFundAdvanceModal}>Record fund advance</Button> : null}
+        >
+          {unifiedHistoryQuery.isError ? (
+            <ErrorState description={getErrorMessage(toAppError(unifiedHistoryQuery.error))} onRetry={() => void unifiedHistoryQuery.refetch()} />
+          ) : unifiedHistoryQuery.data === null && (matchesQuery.isLoading || transactionsQuery.isLoading) ? (
+            <Skeleton active paragraph={{ rows: 7 }} />
+          ) : (
+            <div className="space-y-3">
+              {unifiedHistoryQuery.data === null ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Using merged history from existing matches + transactions because unified backend feed endpoint is unavailable."
+                />
+              ) : null}
+              <GroupFundHistoryFeed items={unifiedHistoryItems} viewMode={historyViewMode} onOpenMatch={(matchId) => setSelectedMatchId(matchId)} />
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
+
+      {showDetailedHistorySections ? <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <SectionCard
           title="Withdrawal History"
           description="Fund outflow history, separated from match and manual-adjustment activity."
@@ -644,9 +843,9 @@ export const GroupFundPage = () => {
             </div>
           )}
         </SectionCard>
-      </div>
+      </div> : null}
 
-      <SectionCard
+      {showDetailedHistorySections ? <SectionCard
         title="Match History"
         description="Group Fund match timeline remains available, but now sits below fund-management controls."
         actions={
@@ -707,9 +906,9 @@ export const GroupFundPage = () => {
             </div>
           </div>
         )}
-      </SectionCard>
+      </SectionCard> : null}
 
-      <SectionCard
+      {showDetailedHistorySections ? <SectionCard
         title="Manual Transactions"
         description="Adjustments and manual entries are kept here, separate from dedicated withdrawal history."
         actions={canWriteActions ? <Button onClick={openTransactionModal}>Create transaction</Button> : null}
@@ -749,7 +948,7 @@ export const GroupFundPage = () => {
             </div>
           </div>
         )}
-      </SectionCard>
+      </SectionCard> : null}
 
       <MatchDetailOverlay open={Boolean(selectedMatchId)} matchId={selectedMatchId} onClose={() => setSelectedMatchId(undefined)} />
 
@@ -800,6 +999,30 @@ export const GroupFundPage = () => {
           </div>
         </div>
       </Modal>
+
+      <GroupFundAdvanceModal
+        open={fundAdvanceOpen}
+        canWrite={canWriteActions}
+        loading={createFundAdvanceMutation.isPending}
+        apiError={fundAdvanceApiError}
+        playerOptions={playerOptions}
+        onCancel={() => setFundAdvanceOpen(false)}
+        onSubmit={async (payload) => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
+
+          setFundAdvanceApiError(null);
+
+          try {
+            await createFundAdvanceMutation.mutateAsync(payload);
+            message.success("Fund advance recorded.");
+            setFundAdvanceOpen(false);
+          } catch (error) {
+            setFundAdvanceApiError(getErrorMessage(toAppError(error)));
+          }
+        }}
+      />
 
       <Modal title="Mark Player Paid Into Fund" open={contributionOpen && canWriteActions} footer={null} onCancel={() => setContributionOpen(false)}>
         <form
@@ -1042,7 +1265,13 @@ export const GroupFundPage = () => {
                   allowClear
                   value={field.value || undefined}
                   onChange={(value) => field.onChange(value || "")}
-                  disabled={!(selectedTransactionType === "CONTRIBUTION" || selectedTransactionType === "WITHDRAWAL")}
+                  disabled={
+                    !(
+                      selectedTransactionType === "CONTRIBUTION" ||
+                      selectedTransactionType === "WITHDRAWAL" ||
+                      selectedTransactionType === "FUND_ADVANCE"
+                    )
+                  }
                   options={playerOptions}
                   size="large"
                   status={transactionErrors.playerId ? "error" : ""}

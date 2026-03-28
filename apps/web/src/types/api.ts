@@ -679,6 +679,74 @@ export interface DebtPeriodTimelineApiDto {
   history?: DebtPeriodTimelineMatchDto[];
 }
 
+export type MatchStakesHistoryEventType = "MATCH" | "DEBT_SETTLEMENT" | "ADVANCE" | "NOTE";
+export type MatchStakesHistoryImpactMode = "AFFECTS_DEBT" | "INFORMATION_ONLY";
+
+export interface MatchStakesHistorySettlementLineDto {
+  payerPlayerId: string;
+  payerPlayerName: string;
+  receiverPlayerId: string;
+  receiverPlayerName: string;
+  amountVnd: number;
+  note?: string | null;
+}
+
+export interface MatchStakesHistoryPlayerImpactDto {
+  playerId: string;
+  playerName: string;
+  debtBeforeVnd?: number | null;
+  debtAfterVnd?: number | null;
+  amountVnd?: number | null;
+}
+
+export interface MatchStakesHistoryItemDto {
+  id: string;
+  itemType: MatchStakesHistoryEventType;
+  postedAt: string;
+  createdAt?: string | null;
+  periodId?: string | null;
+  periodNo?: number | null;
+  matchId?: string | null;
+  matchNo?: number | null;
+  label?: string | null;
+  playerId?: string | null;
+  playerName?: string | null;
+  amountVnd?: number | null;
+  note?: string | null;
+  reason?: string | null;
+  impactMode?: MatchStakesHistoryImpactMode | null;
+  affectsDebt?: boolean | null;
+  debtImpactVnd?: number | null;
+  balanceBeforeVnd?: number | null;
+  balanceAfterVnd?: number | null;
+  settlementLines?: MatchStakesHistorySettlementLineDto[];
+  playerImpacts?: MatchStakesHistoryPlayerImpactDto[];
+}
+
+export interface MatchStakesHistoryQuery {
+  periodId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CreateMatchStakesHistoryEventRequest {
+  periodId?: string | null;
+  eventType: Exclude<MatchStakesHistoryEventType, "MATCH">;
+  playerId?: string | null;
+  amountVnd?: number | null;
+  postedAt?: string;
+  note?: string | null;
+  reason?: string | null;
+  impactMode?: MatchStakesHistoryImpactMode;
+  affectsDebt?: boolean;
+}
+
+export interface CreateMatchStakesHistoryEventResultDto {
+  event: MatchStakesHistoryItemDto;
+}
+
 export interface CreateDebtPeriodRequest {
   title?: string | null;
   note?: string | null;
@@ -756,6 +824,17 @@ export interface GroupFundSummaryDto {
   module: "GROUP_FUND";
   fundBalanceVnd: number;
   totalMatches: number;
+  totalFundAdvanceVnd?: number;
+  totalRegularContributionVnd?: number;
+  totalRegularWithdrawalVnd?: number;
+  outstandingFundAdvanceVnd?: number;
+  fundAdvances?: Array<{
+    playerId: string;
+    playerName: string;
+    advancedVnd: number;
+    reimbursedVnd?: number;
+    outstandingVnd?: number;
+  }>;
   players: Array<{
     playerId: string;
     playerName: string;
@@ -763,11 +842,55 @@ export interface GroupFundSummaryDto {
     currentObligationVnd: number;
     netObligationVnd: number;
     prepaidVnd: number;
+    totalFundAdvanceVnd?: number;
+    outstandingFundAdvanceVnd?: number;
   }>;
   range: { from: string | null; to: string | null };
 }
 
-export type GroupFundTransactionType = "CONTRIBUTION" | "WITHDRAWAL" | "ADJUSTMENT_IN" | "ADJUSTMENT_OUT";
+export type GroupFundTransactionType =
+  | "CONTRIBUTION"
+  | "WITHDRAWAL"
+  | "ADJUSTMENT_IN"
+  | "ADJUSTMENT_OUT"
+  | "FUND_ADVANCE";
+
+export type GroupFundHistoryItemType =
+  | "MATCH"
+  | "CONTRIBUTION"
+  | "WITHDRAWAL"
+  | "ADJUSTMENT_IN"
+  | "ADJUSTMENT_OUT"
+  | "FUND_ADVANCE"
+  | "NOTE";
+
+export interface GroupFundHistoryItemDto {
+  id: string;
+  itemType: GroupFundHistoryItemType;
+  postedAt: string;
+  createdAt?: string | null;
+  matchId?: string | null;
+  playerId?: string | null;
+  playerName?: string | null;
+  actorName?: string | null;
+  amountVnd?: number | null;
+  note?: string | null;
+  reason?: string | null;
+  transactionType?: GroupFundTransactionType | null;
+  movementType?: "FUND_IN" | "FUND_OUT" | null;
+  balanceBeforeVnd?: number | null;
+  balanceAfterVnd?: number | null;
+  fundInVnd?: number | null;
+  fundOutVnd?: number | null;
+}
+
+export interface GroupFundHistoryQuery {
+  playerId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
 
 export interface GroupFundLedgerItemDto {
   entryId: string;
@@ -797,7 +920,23 @@ export interface CreateGroupFundContributionRequest {
   postedAt?: string;
 }
 
+export interface CreateGroupFundAdvanceRequest {
+  playerId: string;
+  amountVnd: number;
+  note?: string | null;
+  postedAt?: string;
+}
+
 export interface CreateGroupFundContributionResultDto {
+  batchId: string;
+  postedAt: string;
+  playerId: string;
+  playerName: string;
+  amountVnd: number;
+  note: string | null;
+}
+
+export interface CreateGroupFundAdvanceResultDto {
   batchId: string;
   postedAt: string;
   playerId: string;

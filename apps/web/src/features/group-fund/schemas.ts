@@ -10,6 +10,16 @@ export const contributionSchema = z.object({
   postedAt: z.string().optional()
 });
 
+export const fundAdvanceSchema = z.object({
+  playerId: z.string().min(1, "Player is required"),
+  amountVnd: z
+    .number({ invalid_type_error: "Amount is required" })
+    .int("Amount must be an integer")
+    .positive("Amount must be positive"),
+  note: z.string().max(400, "Note can be up to 400 characters").optional().or(z.literal("")),
+  postedAt: z.string().optional()
+});
+
 export const withdrawalSchema = z.object({
   playerId: z.string().min(1, "Recipient player is required"),
   amountVnd: z
@@ -22,7 +32,7 @@ export const withdrawalSchema = z.object({
 
 export const manualTransactionSchema = z
   .object({
-    transactionType: z.enum(["CONTRIBUTION", "WITHDRAWAL", "ADJUSTMENT_IN", "ADJUSTMENT_OUT"]),
+    transactionType: z.enum(["CONTRIBUTION", "WITHDRAWAL", "ADJUSTMENT_IN", "ADJUSTMENT_OUT", "FUND_ADVANCE"]),
     playerId: z.string().optional().or(z.literal("")),
     amountVnd: z
       .number({ invalid_type_error: "Amount is required" })
@@ -32,7 +42,7 @@ export const manualTransactionSchema = z
     postedAt: z.string().optional()
   })
   .superRefine((value, ctx) => {
-    if ((value.transactionType === "CONTRIBUTION" || value.transactionType === "WITHDRAWAL") && !value.playerId) {
+    if ((value.transactionType === "CONTRIBUTION" || value.transactionType === "WITHDRAWAL" || value.transactionType === "FUND_ADVANCE") && !value.playerId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["playerId"],
@@ -43,4 +53,5 @@ export const manualTransactionSchema = z
 
 export type ManualTransactionValues = z.infer<typeof manualTransactionSchema>;
 export type ContributionValues = z.infer<typeof contributionSchema>;
+export type FundAdvanceValues = z.infer<typeof fundAdvanceSchema>;
 export type WithdrawalValues = z.infer<typeof withdrawalSchema>;

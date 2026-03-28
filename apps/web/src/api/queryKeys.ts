@@ -25,6 +25,8 @@ export const queryKeys = {
     summary: (query: unknown) => ["match-stakes", "summary", query] as const,
     ledger: (query: unknown) => ["match-stakes", "ledger", query] as const,
     matches: (query: unknown) => ["match-stakes", "matches", query] as const,
+    history: (query: unknown) => ["match-stakes", "history", query] as const,
+    periodHistory: (periodId: string) => ["match-stakes", "debt-periods", "history-items", periodId] as const,
     currentPeriod: ["match-stakes", "debt-periods", "current"] as const,
     allPeriods: ["match-stakes", "debt-periods", "all"] as const,
     allPeriodsHistory: (query: unknown) => ["match-stakes", "debt-periods", "history", query] as const,
@@ -36,6 +38,7 @@ export const queryKeys = {
     summary: (query: unknown) => ["group-fund", "summary", query] as const,
     ledger: (query: unknown) => ["group-fund", "ledger", query] as const,
     matches: (query: unknown) => ["group-fund", "matches", query] as const,
+    history: (query: unknown) => ["group-fund", "history", query] as const,
     transactions: (query: unknown) => ["group-fund", "transactions", query] as const,
     withdrawals: (query: unknown) => ["group-fund", "withdrawals", query] as const
   }

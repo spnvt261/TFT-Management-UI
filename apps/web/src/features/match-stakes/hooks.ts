@@ -4,8 +4,10 @@ import { toAppError } from "@/api/httpClient";
 import { matchStakesApi } from "@/api/matchStakesApi";
 import type {
   CloseDebtPeriodRequest,
+  CreateMatchStakesHistoryEventRequest,
   CreateDebtSettlementRequest,
   DebtPeriodDetailDto,
+  MatchStakesHistoryQuery,
   DebtPeriodTimelineApiDto,
   DebtPeriodTimelineDto,
   DebtPeriodTimelineMatchDto,
@@ -317,6 +319,13 @@ export const useMatchStakesMatches = (query: MatchStakesMatchesQuery, enabled = 
     enabled
   });
 
+export const useMatchStakesHistory = (query: MatchStakesHistoryQuery, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.matchStakes.history(query),
+    queryFn: () => matchStakesApi.history(query),
+    enabled
+  });
+
 export const useCurrentDebtPeriod = () =>
   useQuery({
     queryKey: queryKeys.matchStakes.currentPeriod,
@@ -416,6 +425,33 @@ export const useCloseDebtPeriod = () => {
       await invalidateMatchStakesQueries(queryClient);
       await queryClient.invalidateQueries({
         queryKey: queryKeys.matchStakes.periodDetail(variables.periodId)
+      });
+    }
+  });
+};
+
+export const useCreateMatchStakesHistoryEvent = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateMatchStakesHistoryEventRequest) => matchStakesApi.createHistoryEvent(payload),
+    onSuccess: async (_, variables) => {
+      await invalidateMatchStakesQueries(queryClient);
+
+      if (variables.periodId) {
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodDetail(variables.periodId)
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodTimeline(variables.periodId)
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodHistory(variables.periodId)
+        });
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.dashboard.overview
       });
     }
   });

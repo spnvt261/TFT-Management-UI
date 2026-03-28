@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import {
   AppstoreOutlined,
   DeleteOutlined,
@@ -12,6 +13,8 @@ import { Alert, Button, DatePicker, Input, InputNumber, Modal, Select, Skeleton,
 import dayjs, { type Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { toAppError } from "@/api/httpClient";
+import { matchStakesApi } from "@/api/matchStakesApi";
+import { queryKeys } from "@/api/queryKeys";
 import { FormApiError } from "@/components/common/FormApiError";
 import { AppBreadcrumb } from "@/components/layout/AppBreadcrumb";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -23,23 +26,32 @@ import { EmptyState } from "@/components/states/EmptyState";
 import { ErrorState } from "@/components/states/ErrorState";
 import {
   useAllDebtPeriods,
+  useCreateMatchStakesHistoryEvent,
   useCloseDebtPeriod,
   useCreateDebtPeriod,
   useCreateDebtSettlement,
   useCurrentDebtPeriod,
+  useDebtPeriodDetail,
   useDebtPeriodTimeline,
+  useMatchStakesHistory,
   useInfiniteDebtPeriodHistory
 } from "@/features/match-stakes/hooks";
+import { MatchStakesHistoryEventModal } from "@/features/match-stakes/components/MatchStakesHistoryEventModal";
+import { MatchStakesHistoryFeed, type MatchStakesHistoryFeedItem } from "@/features/match-stakes/components/MatchStakesHistoryFeed";
 import { MatchDetailOverlay, type MatchStakesDetailContext } from "@/features/matches/MatchDetailOverlay";
+import { useActivePlayers } from "@/features/players/hooks";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { debtPeriodStatusLabels, getEnumLabel } from "@/lib/labels";
 import type {
+  CreateMatchStakesHistoryEventRequest,
   CreateDebtSettlementLineRequest,
+  DebtPeriodDetailDto,
   DebtPeriodPlayerSummaryDto,
   DebtPeriodTimelineDto,
   DebtPeriodTimelineMatchDto,
-  DebtPeriodTimelinePlayerRowDto
+  DebtPeriodTimelinePlayerRowDto,
+  MatchStakesHistoryItemDto
 } from "@/types/api";
 
 type SettlementLineForm = {
@@ -199,6 +211,169 @@ const sortHistoryDesc = (history: DebtPeriodTimelineMatchDto[]) => {
   return next;
 };
 
+const sortHistoryFeedDesc = (items: MatchStakesHistoryFeedItem[]) => {
+  const next = [...items];
+  next.sort((left, right) => {
+    const postedDiff = toMillis(right.postedAt) - toMillis(left.postedAt);
+    if (postedDiff !== 0) {
+      return postedDiff;
+    }
+
+    const rightCreated = right.createdAt ? toMillis(right.createdAt) : 0;
+    const leftCreated = left.createdAt ? toMillis(left.createdAt) : 0;
+    if (rightCreated !== leftCreated) {
+      return rightCreated - leftCreated;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
+  return next;
+};
+
+const mapTimelineMatchesToHistoryItems = (
+  timeline: DebtPeriodTimelineDto | undefined
+): MatchStakesHistoryFeedItem[] =>
+  (timeline?.history ?? []).map((historyItem) => ({
+    id: `match:${historyItem.matchId}`,
+    itemType: "MATCH",
+    postedAt: historyItem.playedAt,
+    periodId: timeline?.period.id ?? null,
+    periodNo: timeline?.period.periodNo ?? null,
+    matchId: historyItem.matchId,
+    matchNo: historyItem.matchNo,
+    label: historyItem.label,
+    matchRows: historyItem.players
+  }));
+
+const mapSettlementToHistoryItems = (
+  detail: DebtPeriodDetailDto | undefined,
+  timeline: DebtPeriodTimelineDto | undefined
+): MatchStakesHistoryFeedItem[] =>
+  (detail?.settlements ?? []).map((settlement) => ({
+    id: `settlement:${settlement.id}`,
+    itemType: "DEBT_SETTLEMENT",
+    postedAt: settlement.postedAt,
+    createdAt: settlement.createdAt,
+    periodId: detail?.period.id ?? null,
+    periodNo: detail?.period.periodNo ?? timeline?.period.periodNo ?? null,
+    amountVnd: settlement.lines.reduce((sum, line) => sum + line.amountVnd, 0),
+    note: settlement.note ?? null,
+    settlementLines: settlement.lines.map((line) => ({
+      payerPlayerId: line.payerPlayerId,
+      payerPlayerName: line.payerPlayerName,
+      receiverPlayerId: line.receiverPlayerId,
+      receiverPlayerName: line.receiverPlayerName,
+      amountVnd: line.amountVnd,
+      note: line.note
+    }))
+  }));
+
+type MatchStakesHistoryUnifiedCompatItem = MatchStakesHistoryItemDto & {
+  title?: string | null;
+  description?: string | null;
+  player?: { id: string; name: string } | null;
+  secondaryPlayer?: { id: string; name: string } | null;
+  outstandingBeforeVnd?: number | null;
+  outstandingAfterVnd?: number | null;
+  debtPeriodId?: string | null;
+  metadata?: unknown;
+  matchRows?: DebtPeriodTimelinePlayerRowDto[];
+};
+
+type TimelineMatchLookup = {
+  matchNo: number | null;
+  label: string | null;
+  rows: DebtPeriodTimelinePlayerRowDto[];
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+const toOptionalNumber = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+const buildTimelineMatchLookup = (timeline: DebtPeriodTimelineDto | undefined) => {
+  const map = new Map<string, TimelineMatchLookup>();
+
+  for (const historyItem of timeline?.history ?? []) {
+    map.set(historyItem.matchId, {
+      matchNo: historyItem.matchNo ?? null,
+      label: historyItem.label ?? null,
+      rows: historyItem.players
+    });
+  }
+
+  return map;
+};
+
+const buildSettlementLineLookup = (detail: DebtPeriodDetailDto | undefined) => {
+  const map = new Map<string, NonNullable<MatchStakesHistoryFeedItem["settlementLines"]>>();
+
+  for (const settlement of detail?.settlements ?? []) {
+    map.set(
+      settlement.id,
+      settlement.lines.map((line) => ({
+        payerPlayerId: line.payerPlayerId,
+        payerPlayerName: line.payerPlayerName,
+        receiverPlayerId: line.receiverPlayerId,
+        receiverPlayerName: line.receiverPlayerName,
+        amountVnd: line.amountVnd,
+        note: line.note
+      }))
+    );
+  }
+
+  return map;
+};
+
+const mapServerHistoryItem = (
+  item: MatchStakesHistoryItemDto,
+  context?: {
+    periodNo?: number | null;
+    timelineMatchById?: Map<string, TimelineMatchLookup>;
+    settlementLinesById?: Map<string, NonNullable<MatchStakesHistoryFeedItem["settlementLines"]>>;
+  }
+): MatchStakesHistoryFeedItem => {
+  const compatItem = item as MatchStakesHistoryUnifiedCompatItem;
+  const metadata = isRecord(compatItem.metadata) ? compatItem.metadata : null;
+  const metadataMatchNo = metadata ? toOptionalNumber(metadata["periodMatchNo"]) : null;
+  const timelineMatch = compatItem.matchId ? context?.timelineMatchById?.get(compatItem.matchId) : undefined;
+  const settlementLines = Array.isArray(compatItem.settlementLines)
+    ? compatItem.settlementLines
+    : context?.settlementLinesById?.get(compatItem.id);
+  const matchRows = Array.isArray(compatItem.matchRows) && compatItem.matchRows.length > 0 ? compatItem.matchRows : timelineMatch?.rows;
+
+  return {
+    ...compatItem,
+    itemType: compatItem.itemType,
+    id: compatItem.id,
+    postedAt: compatItem.postedAt,
+    createdAt: compatItem.createdAt ?? null,
+    periodId: compatItem.periodId ?? compatItem.debtPeriodId ?? null,
+    periodNo: compatItem.periodNo ?? context?.periodNo ?? null,
+    matchId: compatItem.matchId ?? null,
+    matchNo: compatItem.matchNo ?? metadataMatchNo ?? timelineMatch?.matchNo ?? null,
+    label: compatItem.label ?? compatItem.title ?? timelineMatch?.label ?? null,
+    playerId: compatItem.playerId ?? compatItem.player?.id ?? null,
+    playerName: compatItem.playerName ?? compatItem.player?.name ?? null,
+    amountVnd: compatItem.amountVnd ?? null,
+    note: compatItem.note ?? null,
+    reason: compatItem.reason ?? compatItem.description ?? null,
+    balanceBeforeVnd:
+      typeof compatItem.balanceBeforeVnd === "number"
+        ? compatItem.balanceBeforeVnd
+        : typeof compatItem.outstandingBeforeVnd === "number"
+          ? compatItem.outstandingBeforeVnd
+          : null,
+    balanceAfterVnd:
+      typeof compatItem.balanceAfterVnd === "number"
+        ? compatItem.balanceAfterVnd
+        : typeof compatItem.outstandingAfterVnd === "number"
+          ? compatItem.outstandingAfterVnd
+          : null,
+    settlementLines,
+    matchRows
+  };
+};
+
 export const MatchStakesPage = () => {
   const navigate = useNavigate();
   const { canWrite } = useAuth();
@@ -237,14 +412,24 @@ export const MatchStakesPage = () => {
   const [closePeriodConfirmText, setClosePeriodConfirmText] = useState("");
   const [closeBalanceDraft, setCloseBalanceDraft] = useState<CloseBalanceDraft>({});
 
+  const [historyEventOpen, setHistoryEventOpen] = useState(false);
+  const [historyEventApiError, setHistoryEventApiError] = useState<string | null>(null);
+
   const currentPeriodQuery = useCurrentDebtPeriod();
   const allPeriodsQuery = useAllDebtPeriods();
   const selectedPeriodTimelineQuery = useDebtPeriodTimeline(selectedPeriodId);
+  const selectedPeriodDetailQuery = useDebtPeriodDetail(selectedPeriodId);
   const allHistoryPeriodsQuery = useInfiniteDebtPeriodHistory(!selectedPeriodId);
+  const selectedPeriodHistoryQuery = useMatchStakesHistory(
+    { periodId: selectedPeriodId, page: 1, pageSize: 200 },
+    Boolean(selectedPeriodId)
+  );
 
   const createSettlementMutation = useCreateDebtSettlement();
   const closePeriodMutation = useCloseDebtPeriod();
   const createPeriodMutation = useCreateDebtPeriod();
+  const createHistoryEventMutation = useCreateMatchStakesHistoryEvent();
+  const playersQuery = useActivePlayers();
 
   const openPeriodId = currentPeriodQuery.data?.period?.id;
   const hasOpenPeriod = Boolean(openPeriodId);
@@ -354,10 +539,123 @@ export const MatchStakesPage = () => {
     [allHistoryPeriodsQuery.data]
   );
 
+  const periodServerHistoryQueries = useQueries({
+    queries: historyPeriodGroups.map((periodTimeline) => ({
+      queryKey: queryKeys.matchStakes.periodHistory(periodTimeline.period.id),
+      queryFn: () => matchStakesApi.history({ periodId: periodTimeline.period.id, page: 1, pageSize: 200 }),
+      enabled: !selectedPeriodId
+    }))
+  });
+
+  const periodDetailQueries = useQueries({
+    queries: historyPeriodGroups.map((periodTimeline) => ({
+      queryKey: queryKeys.matchStakes.periodDetail(periodTimeline.period.id),
+      queryFn: () => matchStakesApi.periodDetail(periodTimeline.period.id),
+      enabled: !selectedPeriodId
+    }))
+  });
+
+  const periodServerHistoryById = useMemo(() => {
+    const map = new Map<string, (ReturnType<typeof matchStakesApi.history> extends Promise<infer T> ? T : never) | undefined>();
+    historyPeriodGroups.forEach((periodTimeline, index) => {
+      map.set(periodTimeline.period.id, periodServerHistoryQueries[index]?.data);
+    });
+    return map;
+  }, [historyPeriodGroups, periodServerHistoryQueries]);
+
+  const periodDetailById = useMemo(() => {
+    const map = new Map<string, (ReturnType<typeof matchStakesApi.periodDetail> extends Promise<infer T> ? T : never) | undefined>();
+    historyPeriodGroups.forEach((periodTimeline, index) => {
+      map.set(periodTimeline.period.id, periodDetailQueries[index]?.data);
+    });
+    return map;
+  }, [historyPeriodGroups, periodDetailQueries]);
+
   const settlementPlayerOptions = sortedPlayers.map((player) => ({
     label: player.playerName,
     value: player.playerId
   }));
+  const historyEventPlayerOptions = useMemo(
+    () => (playersQuery.data ?? []).map((player) => ({ label: player.displayName, value: player.id })),
+    [playersQuery.data]
+  );
+  const historyEventPeriodOptions = useMemo(
+    () =>
+      allPeriods.map((period) => ({
+        value: period.id,
+        label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
+      })),
+    [allPeriods]
+  );
+  const selectedTimelineMatchById = useMemo(() => buildTimelineMatchLookup(selectedTimeline), [selectedTimeline]);
+  const selectedSettlementLinesById = useMemo(
+    () => buildSettlementLineLookup(selectedPeriodDetailQuery.data),
+    [selectedPeriodDetailQuery.data]
+  );
+
+  const selectedPeriodHistoryItems = useMemo<MatchStakesHistoryFeedItem[]>(() => {
+    const serverItems = selectedPeriodHistoryQuery.data?.data;
+    if (Array.isArray(serverItems)) {
+      return sortHistoryFeedDesc(
+        serverItems.map((item) =>
+          mapServerHistoryItem(item, {
+            periodNo: selectedTimeline?.period.periodNo ?? selectedPeriodDetailQuery.data?.period.periodNo ?? null,
+            timelineMatchById: selectedTimelineMatchById,
+            settlementLinesById: selectedSettlementLinesById
+          })
+        )
+      );
+    }
+
+    const fallbackItems = [
+      ...mapTimelineMatchesToHistoryItems(selectedTimeline),
+      ...mapSettlementToHistoryItems(selectedPeriodDetailQuery.data, selectedTimeline)
+    ];
+    return sortHistoryFeedDesc(fallbackItems);
+  }, [
+    selectedPeriodDetailQuery.data,
+    selectedPeriodHistoryQuery.data,
+    selectedSettlementLinesById,
+    selectedTimeline,
+    selectedTimelineMatchById
+  ]);
+
+  const periodHistoryItemsById = useMemo(() => {
+    const map = new Map<string, MatchStakesHistoryFeedItem[]>();
+
+    historyPeriodGroups.forEach((periodTimeline) => {
+      const periodId = periodTimeline.period.id;
+      const serverPayload = periodServerHistoryById.get(periodId);
+      const serverItems = serverPayload?.data;
+      const detail = periodDetailById.get(periodId);
+      const timelineMatchById = buildTimelineMatchLookup(periodTimeline);
+      const settlementLinesById = buildSettlementLineLookup(detail);
+
+      if (Array.isArray(serverItems)) {
+        map.set(
+          periodId,
+          sortHistoryFeedDesc(
+            serverItems.map((item) =>
+              mapServerHistoryItem(item, {
+                periodNo: periodTimeline.period.periodNo,
+                timelineMatchById,
+                settlementLinesById
+              })
+            )
+          )
+        );
+        return;
+      }
+
+      const fallbackItems = [
+        ...mapTimelineMatchesToHistoryItems(periodTimeline),
+        ...mapSettlementToHistoryItems(detail, periodTimeline)
+      ];
+      map.set(periodId, sortHistoryFeedDesc(fallbackItems));
+    });
+
+    return map;
+  }, [historyPeriodGroups, periodDetailById, periodServerHistoryById]);
 
   const closePeriodTargetId = closePeriod?.id;
   const hasOutstanding = hasAnyOutstandingBalance(
@@ -397,6 +695,15 @@ export const MatchStakesPage = () => {
     setCreatePeriodTitle("");
     setCreatePeriodNote("");
     setCreatePeriodOpen(true);
+  };
+
+  const openHistoryEventModal = () => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
+
+    setHistoryEventApiError(null);
+    setHistoryEventOpen(true);
   };
 
   const openClosePeriodModal = () => {
@@ -536,6 +843,7 @@ export const MatchStakesPage = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/match-stakes/new")}>
                 Create match
               </Button>
+              <Button onClick={openHistoryEventModal}>Add history event</Button>
               {hasOpenPeriod ? (
                 <Tooltip title={canOpenClosePeriod ? "Close this period (requires confirmation in modal)." : "Need at least 1 match to close period."}>
                   <span>
@@ -676,7 +984,7 @@ export const MatchStakesPage = () => {
 
       <SectionCard
         title="History"
-        description="Debt accumulation by match."
+        description="Unified chronological history with match and non-match events."
         actions={
           <Tooltip title={historyViewMode === "minimal" ? "Switch to Detail View" : "Switch to Minimal View"}>
             <Button
@@ -689,65 +997,52 @@ export const MatchStakesPage = () => {
         }
       >
         {selectedPeriodId ? (
-          selectedPeriodTimelineQuery.isLoading ? (
+          selectedPeriodTimelineQuery.isLoading || selectedPeriodDetailQuery.isLoading ? (
             <Skeleton active paragraph={{ rows: 6 }} />
           ) : selectedPeriodTimelineQuery.isError ? (
             <ErrorState
               description={getErrorMessage(toAppError(selectedPeriodTimelineQuery.error))}
               onRetry={() => void selectedPeriodTimelineQuery.refetch()}
             />
+          ) : selectedPeriodHistoryQuery.isError ? (
+            <ErrorState
+              description={getErrorMessage(toAppError(selectedPeriodHistoryQuery.error))}
+              onRetry={() => void selectedPeriodHistoryQuery.refetch()}
+            />
           ) : (
             <div className="space-y-2.5">
-              <div className="hidden md:block">
-                <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
-                  {(selectedTimeline?.history ?? []).map((historyItem) => (
-                    <button
-                      key={historyItem.matchId}
-                      className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
-                      onClick={() => openMatchDetail(historyItem, selectedTimeline?.period.periodNo)}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <Tag className="!text-[11px]" color="blue">
-                          {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
-                        </Tag>
-                        <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
-                      </div>
-
-                      <div className="mt-2 space-y-1.5">
-                        {sortTimelineRows(historyItem.players).map((row) => (
-                          <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
-                              <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
-                            </div>
-
-                            {historyViewMode === "detail" ? (
-                              <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                <div className={`font-medium ${getPlacementToneClassName(row)}`}>
-                                  {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
-                                </div>
-                                <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="md:hidden">
-                {selectedTimeline ? renderMobilePeriodSequence(selectedTimeline) : null}
-              </div>
-
-              {(selectedTimeline?.history ?? []).length === 0 ? (
-                <div className="hidden rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-600 md:block">
-                  No matches in this period yet.
-                </div>
+              {selectedPeriodHistoryQuery.data === null ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Using timeline + debt settlements while unified history API is unavailable for this period."
+                />
               ) : null}
 
-              <div className="hidden rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5 md:block">
+              <MatchStakesHistoryFeed
+                items={selectedPeriodHistoryItems}
+                viewMode={historyViewMode}
+                emptyTitle="No history in this period yet"
+                emptyDescription="Create matches or add history events."
+                onOpenMatch={(item) => {
+                  if (!item.matchId) {
+                    return;
+                  }
+
+                  openMatchDetail(
+                    {
+                      matchId: item.matchId,
+                      playedAt: item.postedAt,
+                      matchNo: item.matchNo ?? null,
+                      label: item.label ?? null,
+                      players: item.matchRows ?? []
+                    },
+                    selectedTimeline?.period.periodNo
+                  );
+                }}
+              />
+
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5">
                 <div className="text-sm font-semibold text-slate-900">{`Init of Period #${selectedTimeline?.period.periodNo ?? "-"}`}</div>
                 {(initialPlayers ?? []).length === 0 ? (
                   <div className="mt-2 text-sm text-slate-500">No players yet.</div>
@@ -775,8 +1070,11 @@ export const MatchStakesPage = () => {
           <EmptyState title="No match history yet" description="Create matches to start building debt history." />
         ) : (
           <div className="space-y-3">
-            <div className="hidden space-y-3 md:block">
-              {historyPeriodGroups.map((periodTimeline) => (
+            {historyPeriodGroups.map((periodTimeline) => {
+              const feedItems = periodHistoryItemsById.get(periodTimeline.period.id) ?? [];
+              const usedFallback = periodServerHistoryById.get(periodTimeline.period.id) === null;
+
+              return (
                 <div key={periodTimeline.period.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="text-sm font-semibold text-slate-900">{`Period #${periodTimeline.period.periodNo}`}</div>
@@ -786,69 +1084,38 @@ export const MatchStakesPage = () => {
                   </div>
                   <div className="mb-2 text-xs text-slate-500">{`Opened ${formatDateTime(periodTimeline.period.openedAt)} | Matches ${periodTimeline.summary.totalMatches}`}</div>
 
-                  <div className="flex flex-col gap-2.5 md:flex-row md:flex-wrap md:gap-2">
-                    {periodTimeline.history.map((historyItem) => (
-                      <button
-                        key={historyItem.matchId}
-                        className="focus-ring w-full rounded-lg border border-slate-200/90 bg-white p-2.5 text-left transition hover:border-brand-500 md:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.4rem)]"
-                        onClick={() => openMatchDetail(historyItem, periodTimeline.period.periodNo)}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <Tag className="!text-[11px]" color="blue">
-                            {historyItem.label ?? (historyItem.matchNo ? `Match ${historyItem.matchNo}` : "Match")}
-                          </Tag>
-                          <div className="text-xs font-medium text-slate-700">{formatDateTime(historyItem.playedAt)}</div>
-                        </div>
-
-                        <div className="mt-2 space-y-1.5">
-                          {sortTimelineRows(historyItem.players).map((row) => (
-                            <div key={`${historyItem.matchId}-${row.playerId}`} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0 text-sm font-medium text-slate-900">{row.playerName}</div>
-                                <div className={`text-sm font-semibold ${getOutstandingClassName(row.cumulativeNetVnd)}`}>{formatSignedVnd(row.cumulativeNetVnd)}</div>
-                              </div>
-
-                              {historyViewMode === "detail" ? (
-                                <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                  <div className={`font-medium ${getPlacementToneClassName(row)}`}>
-                                    {getTimelinePlacementLabel(row) ? getTimelinePlacementLabel(row) : "-"}
-                                  </div>
-                                  <div className={getOutstandingClassName(row.matchNetVnd)}>{`Match ${formatSignedVnd(row.matchNetVnd)}`}</div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {periodTimeline.history.length === 0 ? (
-                    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-600">No matches in this period yet.</div>
+                  {usedFallback ? (
+                    <Alert
+                      className="mb-2"
+                      type="info"
+                      showIcon
+                      message="Fallback mode for this period: timeline + debt settlements merged locally."
+                    />
                   ) : null}
 
-                  <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-2.5">
-                    <div className="text-sm font-semibold text-slate-900">{`Init of Period #${periodTimeline.period.periodNo}`}</div>
-                    {periodTimeline.initialRows.length === 0 ? (
-                      <div className="mt-2 text-sm text-slate-500">No players yet.</div>
-                    ) : (
-                      <div className="mt-2 space-y-1">
-                        {sortTimelineRows(periodTimeline.initialRows).map((player) => (
-                          <div key={`${periodTimeline.period.id}-${player.playerId}`} className="flex items-center justify-between gap-2 text-xs">
-                            <span className="text-slate-600">{player.playerName}</span>
-                            <span className="font-medium text-slate-600">{formatSignedVnd(player.cumulativeNetVnd)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                  <MatchStakesHistoryFeed
+                    items={feedItems}
+                    viewMode={historyViewMode}
+                    onOpenMatch={(item) => {
+                      if (!item.matchId) {
+                        return;
+                      }
 
-            <div className="space-y-2.5 md:hidden">
-              {historyPeriodGroups.map((periodTimeline) => renderMobilePeriodSequence(periodTimeline))}
-            </div>
+                      openMatchDetail(
+                        {
+                          matchId: item.matchId,
+                          playedAt: item.postedAt,
+                          matchNo: item.matchNo ?? null,
+                          label: item.label ?? null,
+                          players: item.matchRows ?? []
+                        },
+                        periodTimeline.period.periodNo
+                      );
+                    }}
+                  />
+                </div>
+              );
+            })}
 
             <div ref={historyLoadMoreRef} className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-2.5 text-center text-xs text-slate-500">
               {allHistoryPeriodsQuery.isFetchingNextPage
@@ -868,6 +1135,32 @@ export const MatchStakesPage = () => {
         onClose={() => {
           setSelectedMatchId(undefined);
           setSelectedMatchContext(undefined);
+        }}
+      />
+
+      <MatchStakesHistoryEventModal
+        open={historyEventOpen}
+        canWrite={canWriteActions}
+        loading={createHistoryEventMutation.isPending}
+        apiError={historyEventApiError}
+        defaultPeriodId={selectedPeriodId ?? openPeriodId ?? allPeriods[0]?.id}
+        periodOptions={historyEventPeriodOptions}
+        playerOptions={historyEventPlayerOptions}
+        onCancel={() => setHistoryEventOpen(false)}
+        onSubmit={async (payload: CreateMatchStakesHistoryEventRequest) => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
+
+          setHistoryEventApiError(null);
+
+          try {
+            await createHistoryEventMutation.mutateAsync(payload);
+            message.success("History event recorded.");
+            setHistoryEventOpen(false);
+          } catch (error) {
+            setHistoryEventApiError(getErrorMessage(toAppError(error)));
+          }
         }}
       />
 

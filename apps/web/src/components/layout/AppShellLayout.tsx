@@ -5,7 +5,8 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@/lib/cn";
 
 const navItems = [
-  { to: "/match-stakes", label: "Match Stakes" },
+  { to: "/match-stakes", label: "Match Stakes", activePrefixes: ["/match-stakes"] },
+  { to: "/group-fund/fund", label: "Group Fund", activePrefixes: ["/group-fund"] },
   { to: "/rules", label: "Rules" },
   { to: "/players", label: "Players" },
   { to: "/settings", label: "Settings" }
@@ -17,7 +18,8 @@ const NavContent = ({ onNavigate }: { onNavigate?: () => void }) => {
   return (
     <nav className="space-y-1.5">
       {navItems.map((item) => {
-        const active = location.pathname.startsWith(item.to);
+        const prefixes = "activePrefixes" in item && Array.isArray(item.activePrefixes) ? item.activePrefixes : [item.to];
+        const active = prefixes.some((prefix) => location.pathname.startsWith(prefix));
 
         return (
           <NavLink
