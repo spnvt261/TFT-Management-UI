@@ -78,6 +78,7 @@ const DEFAULT_CURRENT_DEBT_VIEW_MODE: CurrentDebtViewMode = "match-only";
 const HISTORY_VIEW_MODE_STORAGE_KEY = "tft2.match-stakes.history.view-mode";
 const DEFAULT_HISTORY_VIEW_MODE: HistoryViewMode = "minimal";
 const ALL_PERIODS_FILTER_VALUE = "__ALL_PERIODS__";
+const OPEN_PERIOD_FILTER_VALUE = "__OPEN_PERIOD__";
 
 const createSettlementLine = (localId: number): SettlementLineForm => ({
   localId,
@@ -768,6 +769,7 @@ export const MatchStakesPage = () => {
   const [selectedMatchContext, setSelectedMatchContext] = useState<MatchStakesDetailContext>();
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>();
   const historyLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const hasAppliedDefaultOpenPeriodRef = useRef(false);
   const [showDebtPeriodDetail, setShowDebtPeriodDetail] = useState(false);
   const [periodFilterOpen, setPeriodFilterOpen] = useState(false);
   const [currentDebtViewMode, setCurrentDebtViewMode] = useState<CurrentDebtViewMode>(() => {
@@ -851,9 +853,18 @@ export const MatchStakesPage = () => {
         return current;
       }
 
-      return undefined;
+      if (
+        !hasAppliedDefaultOpenPeriodRef.current &&
+        openPeriodId &&
+        allPeriods.some((period) => period.id === openPeriodId)
+      ) {
+        hasAppliedDefaultOpenPeriodRef.current = true;
+        return openPeriodId;
+      }
+
+      return current ? undefined : current;
     });
-  }, [allPeriods]);
+  }, [allPeriods, openPeriodId]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1177,7 +1188,16 @@ export const MatchStakesPage = () => {
     setClosePeriodOpen(true);
   };
 
+  const openPeriodNo = currentPeriodQuery.data?.period?.periodNo;
   const periodSelectOptions = [
+    ...(openPeriodId
+      ? [
+          {
+            value: OPEN_PERIOD_FILTER_VALUE,
+            label: `Open period only (default) - Period #${openPeriodNo ?? "-"}`
+          }
+        ]
+      : []),
     {
       value: ALL_PERIODS_FILTER_VALUE,
       label: "All periods - Full history"
@@ -1187,10 +1207,13 @@ export const MatchStakesPage = () => {
       label: `Period #${period.periodNo} - ${getEnumLabel(debtPeriodStatusLabels, period.status)}`
     }))
   ];
-  const hasNonDefaultFilters = Boolean(selectedPeriodId) || historyViewMode !== DEFAULT_HISTORY_VIEW_MODE;
+  const defaultSelectedPeriodId = openPeriodId;
+  const hasNonDefaultFilters =
+    (selectedPeriodId ?? undefined) !== (defaultSelectedPeriodId ?? undefined) ||
+    historyViewMode !== DEFAULT_HISTORY_VIEW_MODE;
 
   const resetFiltersToDefault = () => {
-    setSelectedPeriodId(undefined);
+    setSelectedPeriodId(defaultSelectedPeriodId);
     setHistoryViewMode(DEFAULT_HISTORY_VIEW_MODE);
     setPeriodFilterOpen(false);
   };
@@ -1764,10 +1787,18 @@ export const MatchStakesPage = () => {
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Period</label>
                 <Select
-                  value={selectedPeriodId ?? ALL_PERIODS_FILTER_VALUE}
+                  value={
+                    openPeriodId && selectedPeriodId === openPeriodId
+                      ? OPEN_PERIOD_FILTER_VALUE
+                      : selectedPeriodId ?? ALL_PERIODS_FILTER_VALUE
+                  }
                   options={periodSelectOptions}
                   onChange={(value) => {
-                    setSelectedPeriodId(value === ALL_PERIODS_FILTER_VALUE ? undefined : value);
+                    if (value === OPEN_PERIOD_FILTER_VALUE) {
+                      setSelectedPeriodId(openPeriodId);
+                    } else {
+                      setSelectedPeriodId(value === ALL_PERIODS_FILTER_VALUE ? undefined : value);
+                    }
                     setPeriodFilterOpen(false);
                   }}
                   placeholder="Select debt period"
