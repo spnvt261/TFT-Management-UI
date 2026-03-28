@@ -32,7 +32,8 @@ import {
   useDebtPeriodDetail,
   useDebtPeriodTimeline,
   useMatchStakesHistory,
-  useInfiniteDebtPeriodHistory
+  useInfiniteDebtPeriodHistory,
+  useResetMatchStakesHistoryEvent
 } from "@/features/match-stakes/hooks";
 import { MatchStakesHistoryEventModal } from "@/features/match-stakes/components/MatchStakesHistoryEventModal";
 import { MatchStakesHistoryFeed, type MatchStakesHistoryFeedItem } from "@/features/match-stakes/components/MatchStakesHistoryFeed";
@@ -263,9 +264,12 @@ const mapTimelineEventsToHistoryItems = (
   timeline: DebtPeriodTimelineDto | undefined
 ): MatchStakesHistoryFeedItem[] =>
   (timeline?.events ?? []).map((eventItem) => ({
-    id: `event:${eventItem.id}`,
+    id: eventItem.id,
     itemType: eventItem.itemType,
     eventType: eventItem.eventType ?? null,
+    eventStatus: eventItem.eventStatus ?? null,
+    resetAt: eventItem.resetAt ?? null,
+    resetReason: eventItem.resetReason ?? null,
     postedAt: eventItem.postedAt,
     periodId: timeline?.period.id ?? null,
     periodNo: timeline?.period.periodNo ?? null,
@@ -277,10 +281,13 @@ const mapTimelineEventsToHistoryItems = (
     amountVnd: eventItem.amountVnd ?? null,
     note: eventItem.note ?? null,
     reason: eventItem.reason ?? null,
+    advancerPlayerId: eventItem.advancerPlayerId ?? null,
+    participantPlayerIds: eventItem.participantPlayerIds ?? [],
     impactMode: eventItem.impactMode ?? null,
     affectsDebt: eventItem.affectsDebt ?? null,
     balanceBeforeVnd: eventItem.balanceBeforeVnd ?? null,
     balanceAfterVnd: eventItem.balanceAfterVnd ?? null,
+    metadata: eventItem.metadata ?? null,
     matchRows: eventItem.rows
   }));
 
@@ -332,6 +339,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const toOptionalNumber = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const toOptionalString = (value: unknown): string | null => (typeof value === "string" && value.trim().length > 0 ? value : null);
 const toOptionalBoolean = (value: unknown): boolean | null => (typeof value === "boolean" ? value : null);
+const toStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 
 const normalizeHistoryItemType = (
   itemType: MatchStakesHistoryUnifiedCompatItem["itemType"] | string | null | undefined,
@@ -505,8 +514,16 @@ const mapServerHistoryItem = (
 ): MatchStakesHistoryFeedItem => {
   const compatItem = item as MatchStakesHistoryUnifiedCompatItem;
   const metadata = isRecord(compatItem.metadata) ? compatItem.metadata : null;
+  const metadataDetails = metadata && isRecord(metadata["details"]) ? metadata["details"] : metadata;
   const metadataMatchNo = metadata ? toOptionalNumber(metadata["periodMatchNo"]) : null;
-  const metadataEventType = metadata ? toOptionalString(metadata["eventType"]) : null;
+  const metadataEventType =
+    (metadataDetails && toOptionalString(metadataDetails["eventType"])) ?? (metadata ? toOptionalString(metadata["eventType"]) : null);
+  const metadataImpactMode = metadataDetails ? toOptionalString(metadataDetails["impactMode"]) : null;
+  const metadataAffectsDebt = metadataDetails ? toOptionalBoolean(metadataDetails["affectsDebt"]) : null;
+  const metadataEventStatus = metadataDetails ? toOptionalString(metadataDetails["eventStatus"]) : null;
+  const metadataResetAt = metadataDetails ? toOptionalString(metadataDetails["resetAt"]) : null;
+  const metadataResetReason = metadataDetails ? toOptionalString(metadataDetails["resetReason"]) : null;
+  const metadataParticipantPlayerIds = metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
   const eventType = compatItem.eventType ?? metadataEventType;
   const resolvedItemType = normalizeHistoryItemType(compatItem.itemType, eventType, compatItem.matchId);
   const timelineMatch = compatItem.matchId ? context?.timelineMatchById?.get(compatItem.matchId) : undefined;
@@ -542,8 +559,20 @@ const mapServerHistoryItem = (
     amountVnd: compatItem.amountVnd ?? null,
     note: compatItem.note ?? null,
     reason: compatItem.reason ?? compatItem.description ?? null,
-    impactMode: compatItem.impactMode ?? null,
-    affectsDebt: toOptionalBoolean(compatItem.affectsDebt),
+    eventStatus:
+      compatItem.eventStatus ??
+      (metadataEventStatus === "ACTIVE" || metadataEventStatus === "RESET" ? metadataEventStatus : null),
+    resetAt: compatItem.resetAt ?? metadataResetAt ?? null,
+    resetReason: compatItem.resetReason ?? metadataResetReason ?? null,
+    advancerPlayerId: compatItem.advancerPlayerId ?? advanceActorFromMetadata?.id ?? resolvedPlayerId,
+    participantPlayerIds:
+      Array.isArray(compatItem.participantPlayerIds) && compatItem.participantPlayerIds.length > 0
+        ? compatItem.participantPlayerIds
+        : metadataParticipantPlayerIds,
+    impactMode:
+      compatItem.impactMode ??
+      (metadataImpactMode === "AFFECTS_DEBT" || metadataImpactMode === "INFORMATIONAL" ? metadataImpactMode : null),
+    affectsDebt: toOptionalBoolean(compatItem.affectsDebt) ?? metadataAffectsDebt,
     balanceBeforeVnd:
       typeof compatItem.balanceBeforeVnd === "number"
         ? compatItem.balanceBeforeVnd
@@ -609,6 +638,10 @@ export const MatchStakesPage = () => {
 
   const [historyEventOpen, setHistoryEventOpen] = useState(false);
   const [historyEventApiError, setHistoryEventApiError] = useState<string | null>(null);
+  const [resetAdvanceOpen, setResetAdvanceOpen] = useState(false);
+  const [resetAdvanceApiError, setResetAdvanceApiError] = useState<string | null>(null);
+  const [resetAdvanceReason, setResetAdvanceReason] = useState("");
+  const [resetAdvanceTarget, setResetAdvanceTarget] = useState<MatchStakesHistoryFeedItem | null>(null);
 
   const currentPeriodQuery = useCurrentDebtPeriod();
   const allPeriodsQuery = useAllDebtPeriods();
@@ -624,6 +657,7 @@ export const MatchStakesPage = () => {
   const closePeriodMutation = useCloseDebtPeriod();
   const createPeriodMutation = useCreateDebtPeriod();
   const createHistoryEventMutation = useCreateMatchStakesHistoryEvent();
+  const resetHistoryEventMutation = useResetMatchStakesHistoryEvent();
   const playersQuery = useActivePlayers();
 
   const openPeriodId = currentPeriodQuery.data?.period?.id;
@@ -904,6 +938,8 @@ export const MatchStakesPage = () => {
   const expectedCloseConfirmText = closePeriod ? `Close Period ${closePeriod.periodNo}` : "";
   const canConfirmClosePeriod =
     canCloseWithMatch && Boolean(expectedCloseConfirmText) && closePeriodConfirmText.trim() === expectedCloseConfirmText;
+  const canConfirmResetAdvance =
+    Boolean(resetAdvanceTarget) && resetAdvanceTarget?.itemType === "ADVANCE" && resetAdvanceTarget?.eventStatus === "ACTIVE";
   const closingBalances = closeBalanceRows.map((player) => ({
     playerId: player.playerId,
     netVnd: Math.trunc(player.draftNetVnd)
@@ -938,6 +974,21 @@ export const MatchStakesPage = () => {
 
     setHistoryEventApiError(null);
     setHistoryEventOpen(true);
+  };
+
+  const openResetAdvanceModal = (item: MatchStakesHistoryFeedItem) => {
+    if (!guardWritePermission(canWriteActions)) {
+      return;
+    }
+
+    if (item.itemType !== "ADVANCE" || item.eventStatus !== "ACTIVE") {
+      return;
+    }
+
+    setResetAdvanceApiError(null);
+    setResetAdvanceReason("");
+    setResetAdvanceTarget(item);
+    setResetAdvanceOpen(true);
   };
 
   const openClosePeriodModal = () => {
@@ -1276,6 +1327,8 @@ export const MatchStakesPage = () => {
               <MatchStakesHistoryFeed
                 items={selectedPeriodHistoryItems}
                 viewMode={historyViewMode}
+                onRequestResetAdvance={canWriteActions ? openResetAdvanceModal : undefined}
+                resettingEventId={resetHistoryEventMutation.isPending ? resetAdvanceTarget?.id ?? null : null}
                 emptyTitle="No history in this period yet"
                 emptyDescription="Create matches or add history events."
                 onOpenMatch={(item) => {
@@ -1350,6 +1403,8 @@ export const MatchStakesPage = () => {
                   <MatchStakesHistoryFeed
                     items={feedItems}
                     viewMode={historyViewMode}
+                    onRequestResetAdvance={canWriteActions ? openResetAdvanceModal : undefined}
+                    resettingEventId={resetHistoryEventMutation.isPending ? resetAdvanceTarget?.id ?? null : null}
                     onOpenMatch={(item) => {
                       if (!item.matchId) {
                         return;
@@ -1417,6 +1472,74 @@ export const MatchStakesPage = () => {
           }
         }}
       />
+
+      <Modal
+        title="Reset advance event"
+        open={resetAdvanceOpen && canWriteActions}
+        okText="Reset event"
+        okButtonProps={{
+          danger: true,
+          loading: resetHistoryEventMutation.isPending,
+          disabled: !canConfirmResetAdvance
+        }}
+        onOk={async () => {
+          if (!guardWritePermission(canWriteActions)) {
+            return;
+          }
+
+          if (!resetAdvanceTarget || !canConfirmResetAdvance) {
+            return;
+          }
+
+          setResetAdvanceApiError(null);
+
+          try {
+            await resetHistoryEventMutation.mutateAsync({
+              eventId: resetAdvanceTarget.id,
+              periodId: resetAdvanceTarget.periodId ?? null,
+              payload: {
+                reason: resetAdvanceReason.trim() || null
+              }
+            });
+            message.success("Advance event reset.");
+            setResetAdvanceOpen(false);
+            setResetAdvanceReason("");
+            setResetAdvanceTarget(null);
+          } catch (error) {
+            setResetAdvanceApiError(getErrorMessage(toAppError(error)));
+          }
+        }}
+        onCancel={() => {
+          setResetAdvanceOpen(false);
+          setResetAdvanceApiError(null);
+          setResetAdvanceReason("");
+          setResetAdvanceTarget(null);
+        }}
+      >
+        <div className="space-y-3">
+          <FormApiError message={resetAdvanceApiError} />
+
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            {`This will mark the advance event as RESET and exclude it from debt impact.`}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <div>{`Advancer: ${resetAdvanceTarget?.playerName ?? "-"}`}</div>
+            <div>{`Amount: ${typeof resetAdvanceTarget?.amountVnd === "number" ? formatVnd(Math.abs(resetAdvanceTarget.amountVnd)) : "-"}`}</div>
+            <div>{`Posted at: ${resetAdvanceTarget ? formatDateTime(resetAdvanceTarget.postedAt) : "-"}`}</div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Reason (optional)</label>
+            <Input.TextArea
+              value={resetAdvanceReason}
+              rows={3}
+              maxLength={250}
+              onChange={(event) => setResetAdvanceReason(event.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
 
       <Modal title="Filter Debt Period" open={periodFilterOpen} footer={null} onCancel={() => setPeriodFilterOpen(false)}>
         <div className="space-y-3">

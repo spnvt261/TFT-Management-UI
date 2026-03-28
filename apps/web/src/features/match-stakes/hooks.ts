@@ -16,7 +16,8 @@ import type {
   MatchListItemDto,
   MatchStakesMatchesQuery,
   ModuleLedgerQuery,
-  ModuleSummaryQuery
+  ModuleSummaryQuery,
+  ResetMatchStakesHistoryEventRequest
 } from "@/types/api";
 
 const PERIODS_PAGE_SIZE = 100;
@@ -32,6 +33,30 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
 const toOptionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
 const toOptionalBoolean = (value: unknown) => (typeof value === "boolean" ? value : null);
+const toStringArray = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const candidate = item.trim();
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+
+    seen.add(candidate);
+    normalized.push(candidate);
+  }
+
+  return normalized;
+};
 const getHighestPositiveImpactRow = (rows: ReturnType<typeof normalizeTimelineRow>[]) => {
   let candidate: ReturnType<typeof normalizeTimelineRow> | null = null;
 
@@ -189,20 +214,32 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
       }
 
       const metadata = isRecord(item.metadata) ? item.metadata : null;
+      const metadataDetails = metadata && isRecord(metadata["details"]) ? metadata["details"] : metadata;
       const fallbackEventType =
         item.type === "ADVANCE" ? "MATCH_STAKES_ADVANCE" : item.type === "NOTE" ? "MATCH_STAKES_NOTE" : null;
       const fallbackEventId = `${payload.period.id}:${item.type}:${events.length + 1}`;
       const metadataPeriodMatchNo = metadata ? toOptionalNumber(metadata["periodMatchNo"]) : null;
+      const metadataEventType = metadataDetails && toOptionalString(metadataDetails["eventType"]);
       const metadataPlayerId =
-        metadata &&
-        (toOptionalString(metadata["playerId"]) ??
-          toOptionalString(metadata["actorPlayerId"]) ??
-          toOptionalString(metadata["ownerPlayerId"]));
+        metadataDetails &&
+        (toOptionalString(metadataDetails["playerId"]) ??
+          toOptionalString(metadataDetails["advancerPlayerId"]) ??
+          toOptionalString(metadataDetails["actorPlayerId"]) ??
+          toOptionalString(metadataDetails["ownerPlayerId"]));
       const metadataPlayerName =
-        metadata &&
-        (toOptionalString(metadata["playerName"]) ??
-          toOptionalString(metadata["actorPlayerName"]) ??
-          toOptionalString(metadata["ownerPlayerName"]));
+        metadataDetails &&
+        (toOptionalString(metadataDetails["playerName"]) ??
+          toOptionalString(metadataDetails["advancerPlayerName"]) ??
+          toOptionalString(metadataDetails["actorPlayerName"]) ??
+          toOptionalString(metadataDetails["ownerPlayerName"]));
+      const metadataParticipantPlayerIds = metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
+      const metadataImpactMode = metadataDetails ? toOptionalString(metadataDetails["impactMode"]) : null;
+      const metadataAffectsDebt = metadataDetails ? toOptionalBoolean(metadataDetails["affectsDebt"]) : null;
+      const metadataEventStatus = metadataDetails ? toOptionalString(metadataDetails["eventStatus"]) : null;
+      const metadataResetAt = metadataDetails ? toOptionalString(metadataDetails["resetAt"]) : null;
+      const metadataResetReason = metadataDetails ? toOptionalString(metadataDetails["resetReason"]) : null;
+      const normalizedMetadataImpactMode =
+        metadataImpactMode === "AFFECTS_DEBT" || metadataImpactMode === "INFORMATIONAL" ? metadataImpactMode : null;
       const fallbackImpactRow =
         item.type === "ADVANCE"
           ? getHighestPositiveImpactRow(normalizedRows) ?? normalizedRows.find((row) => row.matchNetVnd !== 0) ?? normalizedRows[0]
@@ -212,7 +249,7 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         id: item.eventId ?? fallbackEventId,
         itemType: item.type,
         postedAt: item.playedAt ?? payload.period.openedAt,
-        eventType: item.eventType ?? fallbackEventType,
+        eventType: item.eventType ?? metadataEventType ?? fallbackEventType,
         matchId: item.matchId ?? null,
         matchNo: item.matchNo ?? metadataPeriodMatchNo,
         label: item.type === "ADVANCE" ? "Ứng tiền" : "Note",
@@ -220,8 +257,15 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         playerName: metadataPlayerName ?? fallbackImpactRow?.playerName ?? null,
         amountVnd: typeof item.amountVnd === "number" ? item.amountVnd : null,
         note: item.note ?? null,
-        impactMode: item.impactMode ?? null,
-        affectsDebt: toOptionalBoolean(item.affectsDebt),
+        impactMode: item.impactMode ?? normalizedMetadataImpactMode,
+        affectsDebt: toOptionalBoolean(item.affectsDebt) ?? metadataAffectsDebt,
+        eventStatus:
+          item.eventStatus ??
+          (metadataEventStatus === "ACTIVE" || metadataEventStatus === "RESET" ? metadataEventStatus : null),
+        resetAt: item.resetAt ?? metadataResetAt,
+        resetReason: item.resetReason ?? metadataResetReason,
+        advancerPlayerId: metadataPlayerId ?? null,
+        participantPlayerIds: metadataParticipantPlayerIds,
         rows: normalizedRows,
         metadata
       });
@@ -500,6 +544,40 @@ export const useCreateMatchStakesHistoryEvent = () => {
 
   return useMutation({
     mutationFn: (payload: CreateMatchStakesHistoryEventRequest) => matchStakesApi.createHistoryEvent(payload),
+    onSuccess: async (_, variables) => {
+      await invalidateMatchStakesQueries(queryClient);
+
+      if (variables.periodId) {
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodDetail(variables.periodId)
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodTimeline(variables.periodId)
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.matchStakes.periodHistory(variables.periodId)
+        });
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.dashboard.overview
+      });
+    }
+  });
+};
+
+export const useResetMatchStakesHistoryEvent = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      payload
+    }: {
+      eventId: string;
+      payload: ResetMatchStakesHistoryEventRequest;
+      periodId?: string | null;
+    }) => matchStakesApi.resetHistoryEvent(eventId, payload),
     onSuccess: async (_, variables) => {
       await invalidateMatchStakesQueries(queryClient);
 

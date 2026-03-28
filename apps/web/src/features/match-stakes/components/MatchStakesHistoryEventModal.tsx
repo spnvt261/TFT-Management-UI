@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button, Input, InputNumber, Modal, Select } from "antd";
 import { Controller, useForm } from "react-hook-form";
@@ -96,6 +96,7 @@ export const MatchStakesHistoryEventModal = ({
     control,
     watch,
     reset,
+    setValue,
     handleSubmit,
     formState: { errors }
   } = useForm<HistoryEventValues & { periodId?: string }>({
@@ -104,6 +105,7 @@ export const MatchStakesHistoryEventModal = ({
       periodId: defaultPeriodId,
       eventType: "ADVANCE",
       playerId: "",
+      participantPlayerIds: [],
       amountVnd: undefined,
       note: "",
       impactMode: "AFFECTS_DEBT"
@@ -119,6 +121,7 @@ export const MatchStakesHistoryEventModal = ({
       periodId: defaultPeriodId,
       eventType: "ADVANCE",
       playerId: "",
+      participantPlayerIds: [],
       amountVnd: undefined,
       note: "",
       impactMode: "AFFECTS_DEBT"
@@ -126,13 +129,38 @@ export const MatchStakesHistoryEventModal = ({
   }, [defaultPeriodId, open, reset]);
 
   const eventType = watch("eventType");
+  const selectedParticipants = watch("participantPlayerIds");
+  const selectedPlayerId = watch("playerId");
   const noteValue = watch("note");
   const amountValue = watch("amountVnd");
   const normalizedAmountVnd = toPositiveInteger(amountValue);
   const requiresAmount = eventType === "ADVANCE" || eventType === "DEBT_SETTLEMENT";
+  const participantPlayerIds = Array.isArray(selectedParticipants)
+    ? selectedParticipants.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const advancerOptions = useMemo(() => {
+    if (eventType !== "ADVANCE") {
+      return playerOptions;
+    }
+
+    const participantIdSet = new Set(participantPlayerIds);
+    return playerOptions.filter((option) => participantIdSet.has(option.value));
+  }, [eventType, participantPlayerIds, playerOptions]);
+
+  useEffect(() => {
+    if (eventType !== "ADVANCE") {
+      return;
+    }
+
+    if (selectedPlayerId && !participantPlayerIds.includes(selectedPlayerId)) {
+      setValue("playerId", "", { shouldValidate: true });
+    }
+  }, [eventType, participantPlayerIds, selectedPlayerId, setValue]);
+
   const canSubmit =
     noteValue.trim().length > 0 &&
     (!requiresAmount || normalizedAmountVnd !== null) &&
+    (eventType !== "ADVANCE" || (participantPlayerIds.length > 0 && !!selectedPlayerId && participantPlayerIds.includes(selectedPlayerId))) &&
     !loading;
 
   return (
@@ -141,8 +169,11 @@ export const MatchStakesHistoryEventModal = ({
         className="space-y-4"
         onSubmit={handleSubmit(async (values) => {
           const submitAmountVnd = toPositiveInteger(values.amountVnd);
+          const submitParticipantIds = Array.isArray(values.participantPlayerIds)
+            ? values.participantPlayerIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            : [];
 
-          await onSubmit({
+          const payload: CreateMatchStakesHistoryEventRequest = {
             periodId: values.periodId || defaultPeriodId || null,
             eventType: values.eventType,
             playerId: values.playerId || null,
@@ -150,7 +181,13 @@ export const MatchStakesHistoryEventModal = ({
             note: values.note?.trim() || null,
             impactMode: values.impactMode,
             affectsDebt: values.impactMode === "AFFECTS_DEBT"
-          });
+          };
+
+          if (values.eventType === "ADVANCE") {
+            payload.participantPlayerIds = submitParticipantIds;
+          }
+
+          await onSubmit(payload);
         })}
       >
         <FormApiError message={apiError} />
@@ -182,22 +219,61 @@ export const MatchStakesHistoryEventModal = ({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Player</label>
-          <Controller
-            control={control}
-            name="playerId"
-            render={({ field }) => (
-              <Select
-                allowClear
-                value={field.value || undefined}
-                options={playerOptions}
-                onChange={(value) => field.onChange(value ?? "")}
-                placeholder="Optional player"
-                status={errors.playerId ? "error" : ""}
-                className="w-full"
+          <label className="mb-1 block text-sm font-medium">{eventType === "ADVANCE" ? "Participants" : "Player"}</label>
+          {eventType === "ADVANCE" ? (
+            <Controller
+              control={control}
+              name="participantPlayerIds"
+              render={({ field }) => (
+                <Select
+                  mode="multiple"
+                  value={field.value}
+                  options={playerOptions}
+                  onChange={(value) => field.onChange(value ?? [])}
+                  placeholder="Select participants"
+                  status={errors.participantPlayerIds ? "error" : ""}
+                  className="w-full"
+                />
+              )}
+            />
+          ) : (
+            <Controller
+              control={control}
+              name="playerId"
+              render={({ field }) => (
+                <Select
+                  allowClear
+                  value={field.value || undefined}
+                  options={playerOptions}
+                  onChange={(value) => field.onChange(value ?? "")}
+                  placeholder="Optional player"
+                  status={errors.playerId ? "error" : ""}
+                  className="w-full"
+                />
+              )}
+            />
+          )}
+          {errors.participantPlayerIds ? <div className="mt-1 text-xs text-red-600">{errors.participantPlayerIds.message}</div> : null}
+          {eventType === "ADVANCE" ? (
+            <div className="mt-3">
+              <label className="mb-1 block text-sm font-medium">Advancer (paid first)</label>
+              <Controller
+                control={control}
+                name="playerId"
+                render={({ field }) => (
+                  <Select
+                    allowClear
+                    value={field.value || undefined}
+                    options={advancerOptions}
+                    onChange={(value) => field.onChange(value ?? "")}
+                    placeholder="Select advancer"
+                    status={errors.playerId ? "error" : ""}
+                    className="w-full"
+                  />
+                )}
               />
-            )}
-          />
+            </div>
+          ) : null}
           {errors.playerId ? <div className="mt-1 text-xs text-red-600">{errors.playerId.message}</div> : null}
         </div>
 

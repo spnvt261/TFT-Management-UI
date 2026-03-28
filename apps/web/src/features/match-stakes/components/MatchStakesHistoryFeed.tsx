@@ -1,5 +1,5 @@
 import { EmptyState } from "@/components/states/EmptyState";
-import { Tag } from "antd";
+import { Button, Tag } from "antd";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import type { MatchStakesHistoryItemDto, DebtPeriodTimelinePlayerRowDto } from "@/types/api";
 
@@ -13,6 +13,8 @@ interface MatchStakesHistoryFeedProps {
   items: MatchStakesHistoryFeedItem[];
   viewMode: MatchStakesHistoryViewMode;
   onOpenMatch: (item: MatchStakesHistoryFeedItem) => void;
+  onRequestResetAdvance?: (item: MatchStakesHistoryFeedItem) => void;
+  resettingEventId?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -72,6 +74,11 @@ const sortMatchRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
   return next;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
+const toStringArray = (value: unknown) =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+
 const normalizeHistoryItemType = (item: MatchStakesHistoryFeedItem) => {
   const rawType = typeof item.itemType === "string" ? item.itemType.toUpperCase() : "";
   const rawEventType = typeof item.eventType === "string" ? item.eventType.toUpperCase() : "";
@@ -109,23 +116,6 @@ const getMatchPrimaryTag = (item: MatchStakesHistoryFeedItem) => {
   }
 
   return "Match";
-};
-
-const getImpactTag = (item: MatchStakesHistoryFeedItem) => {
-  const mode = item.impactMode;
-  if (mode === "AFFECTS_DEBT") {
-    return "Affects debt";
-  }
-
-  if (mode === "INFORMATIONAL") {
-    return "Info only";
-  }
-
-  if (typeof item.affectsDebt === "boolean") {
-    return item.affectsDebt ? "Affects debt" : "Info only";
-  }
-
-  return null;
 };
 
 const resolvePlayerImpactDelta = (impact: NonNullable<MatchStakesHistoryItemDto["playerImpacts"]>[number]) => {
@@ -182,10 +172,88 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
     }));
 };
 
+const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
+  if (!isRecord(item.metadata)) {
+    return null;
+  }
+
+  return isRecord(item.metadata.details) ? item.metadata.details : item.metadata;
+};
+
+const resolveAdvanceParticipantIds = (item: MatchStakesHistoryFeedItem) => {
+  if (Array.isArray(item.participantPlayerIds) && item.participantPlayerIds.length > 0) {
+    return item.participantPlayerIds;
+  }
+
+  const metadataDetails = getAdvanceMetadataDetails(item);
+  return metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
+};
+
+const resolveAdvanceParticipantSummary = (item: MatchStakesHistoryFeedItem) => {
+  const participantIds = resolveAdvanceParticipantIds(item);
+
+  const candidateNames = new Set<string>();
+  for (const impact of item.playerImpacts ?? []) {
+    if (impact.playerName) {
+      candidateNames.add(impact.playerName);
+    }
+  }
+
+  const metadataDetails = getAdvanceMetadataDetails(item);
+  const impactLines = metadataDetails?.["impactLines"];
+  if (Array.isArray(impactLines)) {
+    for (const line of impactLines) {
+      if (!isRecord(line)) {
+        continue;
+      }
+
+      const playerName = toOptionalString(line["playerName"]);
+      if (playerName) {
+        candidateNames.add(playerName);
+      }
+    }
+  }
+
+  if (candidateNames.size > 0) {
+    return `Participants: ${Array.from(candidateNames).join(", ")}`;
+  }
+
+  if (participantIds.length > 0) {
+    return `Participants: ${participantIds.length}`;
+  }
+
+  return null;
+};
+
+const toResetLabel = (item: MatchStakesHistoryFeedItem) => {
+  if (item.eventStatus !== "RESET") {
+    return null;
+  }
+
+  const resetAtLabel = item.resetAt ? formatDateTime(item.resetAt) : null;
+  const resetReasonLabel = item.resetReason?.trim() || null;
+
+  if (resetAtLabel && resetReasonLabel) {
+    return `Reset at ${resetAtLabel}: ${resetReasonLabel}`;
+  }
+
+  if (resetAtLabel) {
+    return `Reset at ${resetAtLabel}`;
+  }
+
+  if (resetReasonLabel) {
+    return `Reset reason: ${resetReasonLabel}`;
+  }
+
+  return "Reset";
+};
+
 export const MatchStakesHistoryFeed = ({
   items,
   viewMode,
   onOpenMatch,
+  onRequestResetAdvance,
+  resettingEventId,
   emptyTitle = "No history yet",
   emptyDescription = "Create matches or events to build history."
 }: MatchStakesHistoryFeedProps) => {
@@ -201,21 +269,35 @@ export const MatchStakesHistoryFeed = ({
         const clickable = itemType === "MATCH" && Boolean(item.matchId);
         const hasMatchRows = itemType === "MATCH" && Array.isArray(item.matchRows) && item.matchRows.length > 0;
         const sortedMatchRows = hasMatchRows ? sortMatchRows(item.matchRows ?? []) : [];
-        const impactTag = itemType === "ADVANCE" ? getImpactTag(item) : null;
+        const advanceNoteTag = itemType === "ADVANCE" ? item.note?.trim() ?? null : null;
         const advanceDetailRows = itemType === "ADVANCE" ? buildAdvanceDetailRows(item) : [];
+        const participantSummary = itemType === "ADVANCE" ? resolveAdvanceParticipantSummary(item) : null;
+        const resetLabel = itemType === "ADVANCE" ? toResetLabel(item) : null;
+        const canResetAdvance = itemType === "ADVANCE" && item.eventStatus === "ACTIVE" && !!onRequestResetAdvance;
 
         return (
-          <button
+          <div
             key={item.id}
             className={`focus-ring w-full rounded-lg border border-slate-200 bg-white p-3 text-left transition ${
-              clickable ? "hover:border-brand-500" : "cursor-default"
+              clickable ? "cursor-pointer hover:border-brand-500" : "cursor-default"
             }`}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
             onClick={() => {
               if (clickable) {
                 onOpenMatch(item);
               }
             }}
-            disabled={!clickable}
+            onKeyDown={(event) => {
+              if (!clickable) {
+                return;
+              }
+
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpenMatch(item);
+              }
+            }}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -233,11 +315,8 @@ export const MatchStakesHistoryFeed = ({
                     <Tag color="purple" className="!text-[11px]">
                       Advance
                     </Tag>
-                    {impactTag ? (
-                      <Tag className="!text-[11px]">
-                        {impactTag}
-                      </Tag>
-                    ) : null}
+                    {advanceNoteTag ? <Tag className="!text-[11px]">{advanceNoteTag}</Tag> : null}
+                    {item.eventStatus === "RESET" ? <Tag className="!text-[11px]">Reset</Tag> : null}
                   </>
                 ) : itemType === "DEBT_SETTLEMENT" ? (
                   <Tag color="gold" className="!text-[11px]">
@@ -247,14 +326,30 @@ export const MatchStakesHistoryFeed = ({
                   <Tag className="!text-[11px]">Note</Tag>
                 )}
               </div>
-              <div className="text-xs font-medium text-slate-600">{formatDateTime(item.postedAt)}</div>
+              <div className="flex items-center gap-2">
+                {canResetAdvance ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    className="!h-auto !p-0 text-xs"
+                    loading={resettingEventId === item.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRequestResetAdvance?.(item);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                ) : null}
+                <div className="text-xs font-medium text-slate-600">{formatDateTime(item.postedAt)}</div>
+              </div>
             </div>
 
             <div className="mt-1.5 flex flex-wrap items-start justify-between gap-2">
               <div className="space-y-1">
-                {itemType === "ADVANCE" ? (
-                  <div className="text-sm font-semibold text-slate-900">{item.playerName ?? "Player"}</div>
-                ) : null}
+                {itemType === "ADVANCE" ? <div className="text-sm font-semibold text-slate-900">{item.playerName ?? "Player"}</div> : null}
+                {itemType === "ADVANCE" && participantSummary ? <div className="text-xs text-slate-500">{participantSummary}</div> : null}
+                {itemType === "ADVANCE" && resetLabel ? <div className="text-xs text-rose-600">{resetLabel}</div> : null}
                 {!hasMatchRows && itemType !== "ADVANCE" && item.playerName ? <div className="text-sm text-slate-700">{item.playerName}</div> : null}
                 {item.reason ? <div className="text-xs text-slate-500">{item.reason}</div> : null}
                 {itemType !== "ADVANCE" && item.note ? <div className="text-xs text-slate-500">{item.note}</div> : null}
@@ -305,11 +400,6 @@ export const MatchStakesHistoryFeed = ({
 
             {itemType === "ADVANCE" && viewMode === "detail" ? (
               <div className="mt-2 space-y-1.5 text-[11px] text-slate-500">
-                {item.note ? (
-                  <div className="rounded-md border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1.5 text-xs font-medium text-fuchsia-800">
-                    {`Note: ${item.note}`}
-                  </div>
-                ) : null}
                 {advanceDetailRows.map((row, index) => {
                   const isReceive = row.deltaVnd > 0;
                   return (
@@ -323,6 +413,9 @@ export const MatchStakesHistoryFeed = ({
                     </div>
                   );
                 })}
+                {resetLabel ? (
+                  <div className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-700">{resetLabel}</div>
+                ) : null}
               </div>
             ) : null}
 
@@ -335,7 +428,7 @@ export const MatchStakesHistoryFeed = ({
                 ))}
               </div>
             ) : null}
-          </button>
+          </div>
         );
       })}
     </div>

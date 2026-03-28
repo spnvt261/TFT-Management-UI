@@ -22,7 +22,9 @@ import type {
   MatchStakesSummaryDto,
   ModuleLedgerQuery,
   ModuleSummaryQuery,
-  PaginationMeta
+  PaginationMeta,
+  ResetMatchStakesHistoryEventRequest,
+  ResetMatchStakesHistoryEventResultDto
 } from "@/types/api";
 
 const OPTIONAL_ENDPOINT_STATUSES = new Set([404, 405, 501]);
@@ -76,6 +78,7 @@ type MatchStakesHistoryEventV2Payload =
       eventType: "MATCH_STAKES_ADVANCE";
       postedAt?: string;
       playerId: string;
+      participantPlayerIds: string[];
       amountVnd: number;
       note?: string | null;
       impactMode?: "AFFECTS_DEBT" | "INFORMATIONAL";
@@ -111,26 +114,90 @@ const toPositiveInteger = (value: unknown) => {
   return normalized > 0 ? normalized : null;
 };
 
+const normalizeIdArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const candidate = item.trim();
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+
+    seen.add(candidate);
+    normalized.push(candidate);
+  }
+
+  return normalized;
+};
+
+const mergeUniqueIds = (...groups: Array<Array<string | null | undefined>>) => {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const group of groups) {
+    for (const rawId of group) {
+      if (typeof rawId !== "string") {
+        continue;
+      }
+
+      const candidate = rawId.trim();
+      if (!candidate || seen.has(candidate)) {
+        continue;
+      }
+
+      seen.add(candidate);
+      merged.push(candidate);
+    }
+  }
+
+  return merged;
+};
+
 const normalizeHistoryEventPayload = (payload: CreateMatchStakesHistoryEventRequest): CreateMatchStakesHistoryEventRequest => {
   const normalizedAmountVnd = toPositiveInteger(payload.amountVnd);
+  const participantPlayerIds = normalizeIdArray(payload.participantPlayerIds);
+  const beneficiaryPlayerIds = normalizeIdArray(payload.beneficiaryPlayerIds);
 
   return {
     ...payload,
-    amountVnd: normalizedAmountVnd
+    amountVnd: normalizedAmountVnd,
+    participantPlayerIds,
+    beneficiaryPlayerIds
   };
 };
 
 const toMatchStakesHistoryEventV2Payload = (payload: CreateMatchStakesHistoryEventRequest): MatchStakesHistoryEventV2Payload | null => {
   if (payload.eventType === "ADVANCE") {
     const amountVnd = toPositiveInteger(payload.amountVnd);
-    if (!payload.playerId || amountVnd === null) {
+    const advancerPlayerId = typeof payload.playerId === "string" ? payload.playerId.trim() : "";
+    if (!advancerPlayerId || amountVnd === null) {
+      return null;
+    }
+
+    const normalizedParticipantPlayerIds = normalizeIdArray(payload.participantPlayerIds);
+    const participantPlayerIds =
+      normalizedParticipantPlayerIds.length > 0
+        ? normalizedParticipantPlayerIds
+        : mergeUniqueIds([advancerPlayerId], normalizeIdArray(payload.beneficiaryPlayerIds));
+
+    if (participantPlayerIds.length === 0 || !participantPlayerIds.includes(advancerPlayerId)) {
       return null;
     }
 
     return {
       eventType: "MATCH_STAKES_ADVANCE",
       postedAt: toOptionalIso(payload.postedAt),
-      playerId: payload.playerId,
+      playerId: advancerPlayerId,
+      participantPlayerIds,
       amountVnd,
       note: payload.note?.trim() || null,
       impactMode: payload.impactMode,
@@ -242,5 +309,12 @@ export const matchStakesApi = {
     }
 
     throw new Error("Match Stakes history-event endpoint is not available on backend.");
+  },
+  resetHistoryEvent: async (eventId: string, payload: ResetMatchStakesHistoryEventRequest) => {
+    const response = await apiPost<ResetMatchStakesHistoryEventResultDto, ResetMatchStakesHistoryEventRequest>(
+      `/match-stakes/history-events/${eventId}/reset`,
+      payload
+    );
+    return response.data;
   }
 };
