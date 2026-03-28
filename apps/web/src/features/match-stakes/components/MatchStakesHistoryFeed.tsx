@@ -70,8 +70,6 @@ const sortMatchRows = (rows: DebtPeriodTimelinePlayerRowDto[]) => {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
 const toOptionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
-const toStringArray = (value: unknown) =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 const getFirstFiniteNumber = (...values: Array<number | null | undefined>) => {
   for (const value of values) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -198,6 +196,14 @@ const sortAdvanceDetailRowsByName = (rows: AdvanceDetailRow[]) => {
   return next;
 };
 
+const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
+  if (!isRecord(item.metadata)) {
+    return null;
+  }
+
+  return isRecord(item.metadata.details) ? item.metadata.details : item.metadata;
+};
+
 const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetailRow[] => {
   const combinedSnapshotByPlayerId = new Map<string, { beforeVnd: number; afterVnd: number }>();
   for (const row of item.matchRows ?? []) {
@@ -298,10 +304,36 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
   }
 
   if (!Array.isArray(item.matchRows)) {
-    return [];
+    const eventLevelBeforeVnd = toOptionalNumber(item.balanceBeforeVnd);
+    const eventLevelAfterVnd = toOptionalNumber(item.balanceAfterVnd);
+    const eventLevelDeltaVnd =
+      (eventLevelBeforeVnd !== null && eventLevelAfterVnd !== null
+        ? eventLevelAfterVnd - eventLevelBeforeVnd
+        : null) ??
+      toOptionalNumber(item.debtImpactVnd) ??
+      toOptionalNumber(item.amountVnd) ??
+      0;
+
+    const fallbackBeforeVnd = eventLevelBeforeVnd;
+    const fallbackAfterVnd =
+      eventLevelAfterVnd !== null
+        ? eventLevelAfterVnd
+        : fallbackBeforeVnd !== null
+          ? fallbackBeforeVnd + eventLevelDeltaVnd
+          : null;
+
+    return [
+      {
+        playerId: toOptionalString(item.playerId) ?? null,
+        playerName: toOptionalString(item.playerName) ?? "Player",
+        deltaVnd: eventLevelDeltaVnd,
+        beforeVnd: fallbackBeforeVnd,
+        afterVnd: fallbackAfterVnd
+      }
+    ];
   }
 
-  return sortAdvanceDetailRowsByName(
+  const rowsFromMatchRows = sortAdvanceDetailRowsByName(
     item.matchRows
     .filter((row) => getCombinedRowDelta(row) !== 0)
     .map((row) => ({
@@ -312,59 +344,38 @@ const buildAdvanceDetailRows = (item: MatchStakesHistoryFeedItem): AdvanceDetail
       afterVnd: getCombinedRowCumulative(row)
     }))
   );
-};
 
-const getAdvanceMetadataDetails = (item: MatchStakesHistoryFeedItem) => {
-  if (!isRecord(item.metadata)) {
-    return null;
+  if (rowsFromMatchRows.length > 0) {
+    return rowsFromMatchRows;
   }
 
-  return isRecord(item.metadata.details) ? item.metadata.details : item.metadata;
-};
+  const eventLevelBeforeVnd = toOptionalNumber(item.balanceBeforeVnd);
+  const eventLevelAfterVnd = toOptionalNumber(item.balanceAfterVnd);
+  const eventLevelDeltaVnd =
+    (eventLevelBeforeVnd !== null && eventLevelAfterVnd !== null
+      ? eventLevelAfterVnd - eventLevelBeforeVnd
+      : null) ??
+    toOptionalNumber(item.debtImpactVnd) ??
+    toOptionalNumber(item.amountVnd) ??
+    0;
 
-const resolveAdvanceParticipantIds = (item: MatchStakesHistoryFeedItem) => {
-  if (Array.isArray(item.participantPlayerIds) && item.participantPlayerIds.length > 0) {
-    return item.participantPlayerIds;
-  }
+  const fallbackBeforeVnd = eventLevelBeforeVnd;
+  const fallbackAfterVnd =
+    eventLevelAfterVnd !== null
+      ? eventLevelAfterVnd
+      : fallbackBeforeVnd !== null
+        ? fallbackBeforeVnd + eventLevelDeltaVnd
+        : null;
 
-  const metadataDetails = getAdvanceMetadataDetails(item);
-  return metadataDetails ? toStringArray(metadataDetails["participantPlayerIds"]) : [];
-};
-
-const resolveAdvanceParticipantSummary = (item: MatchStakesHistoryFeedItem) => {
-  const participantIds = resolveAdvanceParticipantIds(item);
-
-  const candidateNames = new Set<string>();
-  for (const impact of item.playerImpacts ?? []) {
-    if (impact.playerName) {
-      candidateNames.add(impact.playerName);
+  return [
+    {
+      playerId: toOptionalString(item.playerId) ?? null,
+      playerName: toOptionalString(item.playerName) ?? "Player",
+      deltaVnd: eventLevelDeltaVnd,
+      beforeVnd: fallbackBeforeVnd,
+      afterVnd: fallbackAfterVnd
     }
-  }
-
-  const metadataDetails = getAdvanceMetadataDetails(item);
-  const impactLines = Array.isArray(item.impactLines) && item.impactLines.length > 0 ? item.impactLines : metadataDetails?.["impactLines"];
-  if (Array.isArray(impactLines)) {
-    for (const line of impactLines) {
-      if (!isRecord(line)) {
-        continue;
-      }
-
-      const playerName = toOptionalString(line["playerName"]);
-      if (playerName) {
-        candidateNames.add(playerName);
-      }
-    }
-  }
-
-  if (candidateNames.size > 0) {
-    return `Participants: ${Array.from(candidateNames).join(", ")}`;
-  }
-
-  if (participantIds.length > 0) {
-    return `Participants: ${participantIds.length}`;
-  }
-
-  return null;
+  ];
 };
 
 const toResetLabel = (item: MatchStakesHistoryFeedItem) => {
@@ -405,6 +416,8 @@ const getRowDeltaLabel = (debtViewMode: "match-only" | "advance-only" | "combine
 const resolveMatchHistoryMode = (debtViewMode: "match-only" | "advance-only" | "combined") =>
   debtViewMode === "combined" ? "combined" : "match-only";
 
+const compactTagClassName = "!text-[11px] !mr-1 !mb-0";
+
 export const MatchStakesHistoryFeed = ({
   items,
   viewMode,
@@ -429,9 +442,10 @@ export const MatchStakesHistoryFeed = ({
         const sortedMatchRows = hasMatchRows ? sortMatchRows(item.matchRows ?? []) : [];
         const advanceNoteTag = itemType === "ADVANCE" ? item.note?.trim() ?? null : null;
         const advanceDetailRows = itemType === "ADVANCE" ? buildAdvanceDetailRows(item) : [];
-        const participantSummary = itemType === "ADVANCE" ? resolveAdvanceParticipantSummary(item) : null;
         const resetLabel = itemType === "ADVANCE" ? toResetLabel(item) : null;
         const canResetAdvance = itemType === "ADVANCE" && item.eventStatus === "ACTIVE" && !!onRequestResetAdvance;
+        const advanceHeadlineLabel =
+          itemType === "ADVANCE" && itemAmount !== null ? `${item.playerName ?? "Player"}: ${formatVnd(Math.abs(itemAmount))}` : null;
 
         return (
           <div
@@ -458,30 +472,36 @@ export const MatchStakesHistoryFeed = ({
             }}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1">
                 {itemType === "MATCH" ? (
                   <>
-                    <Tag color="blue" className="!text-[11px]">
+                    <Tag color="blue" className={compactTagClassName}>
                       {getMatchPrimaryTag(item)}
                     </Tag>
-                    <Tag color="geekblue" className="!text-[11px]">
+                    <Tag color="geekblue" className={compactTagClassName}>
                       TFT
                     </Tag>
                   </>
                 ) : itemType === "ADVANCE" ? (
-                  <>
-                    <Tag color="purple" className="!text-[11px]">
-                      Advance
-                    </Tag>
-                    {advanceNoteTag ? <Tag className="!text-[11px]">{advanceNoteTag}</Tag> : null}
-                    {item.eventStatus === "RESET" ? <Tag className="!text-[11px]">Reset</Tag> : null}
-                  </>
+                  <div className="flex flex-wrap items-center gap-1 [&_.ant-tag]:!m-0">
+                    {advanceHeadlineLabel ? (
+                      <Tag className={`${compactTagClassName} !border-fuchsia-200 !bg-fuchsia-50 !text-fuchsia-700`}>
+                        {advanceHeadlineLabel}
+                      </Tag>
+                    ) : null}
+                    {advanceNoteTag ? (
+                      <Tag color="purple" className={compactTagClassName}>
+                        {advanceNoteTag}
+                      </Tag>
+                    ) : null}
+                    {item.eventStatus === "RESET" ? <Tag className={compactTagClassName}>Reset</Tag> : null}
+                  </div>
                 ) : itemType === "DEBT_SETTLEMENT" ? (
-                  <Tag color="gold" className="!text-[11px]">
+                  <Tag color="gold" className={compactTagClassName}>
                     Debt settlement
                   </Tag>
                 ) : (
-                  <Tag className="!text-[11px]">Note</Tag>
+                  <Tag className={compactTagClassName}>Note</Tag>
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -505,22 +525,17 @@ export const MatchStakesHistoryFeed = ({
 
             <div className="mt-1.5 flex flex-wrap items-start justify-between gap-2">
               <div className="space-y-1">
-                {itemType === "ADVANCE" ? <div className="text-sm font-semibold text-slate-900">{item.playerName ?? "Player"}</div> : null}
-                {itemType === "ADVANCE" && participantSummary ? <div className="text-xs text-slate-500">{participantSummary}</div> : null}
+                {itemType === "ADVANCE" && !advanceHeadlineLabel ? <div className="text-sm font-semibold text-slate-900">{item.playerName ?? "Player"}</div> : null}
                 {itemType === "ADVANCE" && resetLabel ? <div className="text-xs text-rose-600">{resetLabel}</div> : null}
                 {!hasMatchRows && itemType !== "ADVANCE" && item.playerName ? <div className="text-sm text-slate-700">{item.playerName}</div> : null}
                 {item.reason ? <div className="text-xs text-slate-500">{item.reason}</div> : null}
                 {itemType !== "ADVANCE" && item.note ? <div className="text-xs text-slate-500">{item.note}</div> : null}
               </div>
-              {itemAmount !== null ? (
+              {itemAmount !== null && itemType !== "ADVANCE" ? (
                 <div
-                  className={
-                    itemType === "ADVANCE"
-                      ? "text-xl font-bold text-fuchsia-700"
-                      : `text-sm font-semibold ${getAmountClassName(itemAmount)}`
-                  }
+                  className={`text-sm font-semibold ${getAmountClassName(itemAmount)}`}
                 >
-                  {itemType === "ADVANCE" ? formatVnd(Math.abs(itemAmount)) : formatSignedAmount(itemAmount)}
+                  {formatSignedAmount(itemAmount)}
                 </div>
               ) : null}
             </div>
@@ -566,19 +581,20 @@ export const MatchStakesHistoryFeed = ({
                 {advanceDetailRows.map((row, index) => {
                   const afterVnd = row.afterVnd ?? row.deltaVnd;
                   const beforeVnd = row.beforeVnd ?? (afterVnd - row.deltaVnd);
+                  const isCombinedMode = debtViewMode === "combined";
+                  const headlineVnd = isCombinedMode ? afterVnd : row.deltaVnd;
                   return (
                     <div key={`${item.id}-advance-${row.playerId ?? index}`} className="rounded-md border border-slate-200 bg-slate-50/80 px-2.5 py-1.5">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 text-xs font-medium text-slate-800">{row.playerName}</div>
-                        <div className={`text-sm font-semibold ${getAmountClassName(afterVnd)}`}>
-                          {formatSignedAmount(afterVnd)}
+                        <div className={`text-sm font-semibold ${getAmountClassName(headlineVnd)}`}>
+                          {formatSignedAmount(headlineVnd)}
                         </div>
                       </div>
-                      {viewMode === "detail" ? (
+                      {viewMode === "detail" && isCombinedMode ? (
                         <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
                           <span className={getAmountClassName(row.deltaVnd)}>{`Advance: ${formatSignedAmount(row.deltaVnd)}`}</span>
                           <span>{`Before: ${formatSignedAmount(beforeVnd)}`}</span>
-                          <span>{`After: ${formatSignedAmount(afterVnd)}`}</span>
                         </div>
                       ) : null}
                     </div>
