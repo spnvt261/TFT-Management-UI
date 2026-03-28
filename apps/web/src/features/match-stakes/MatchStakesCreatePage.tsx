@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Input, InputNumber, Modal, Select, Tag, message } from "antd";
+import { Alert, Button, Card, Input, InputNumber, Modal, Select, Spin, Tag, message } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { matchesApi } from "@/api/matchesApi";
 import { queryKeys } from "@/api/queryKeys";
@@ -365,6 +365,11 @@ export const MatchStakesCreatePage = () => {
   const hasRuleLoadError = ruleSetsQuery.isError || ruleDetailQueries.some((query) => query.isError);
   const isRuleLoading = ruleSetsQuery.isLoading || ruleDetailQueries.some((query) => query.isLoading);
   const ruleLoadErrorMessage = getErrorMessage(toAppError(ruleSetsQuery.error ?? ruleDetailQueries.find((query) => query.error)?.error));
+  const isLoadingPlayers = playersQuery.isLoading;
+  const isLoadingRules = isRuleLoading;
+  const isCalculatingSettlement = previewMutation.isPending;
+  const isParticipantsLoading = isLoadingPlayers || isCalculatingSettlement;
+  const isParticipantInputLocked = isCalculatingSettlement || createMutation.isPending;
 
   const canCreate = Boolean(previewData) && hasBalancedNet && !createMutation.isPending && (!requiresAdjustmentNote || hasAdjustmentNote);
   const canTriggerRecalculate = isInputComplete && !previewMutation.isPending;
@@ -582,7 +587,6 @@ export const MatchStakesCreatePage = () => {
 
       <PageHeader
         title="Create Match Stakes Match"
-        subtitle="Select participants, preview settlement, optionally adjust nets, then create match."
         actions={<Button onClick={() => navigate("/match-stakes")}>Back to Match Stakes</Button>}
       />
 
@@ -594,7 +598,14 @@ export const MatchStakesCreatePage = () => {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[420px_1fr]">
+      <section className="relative grid grid-cols-1 gap-3 xl:grid-cols-[420px_1fr]">
+        {createMutation.isPending ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/60 backdrop-blur-[1px]">
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <Spin size="large" tip="Creating match..." />
+            </div>
+          </div>
+        ) : null}
         <SectionCard title="Setup" bodyClassName="space-y-4">
           <div>
             <div className="mb-1 block text-sm font-medium">Module</div>
@@ -605,6 +616,7 @@ export const MatchStakesCreatePage = () => {
             label="Participant count"
             value={participantCount}
             options={PARTICIPANT_COUNT_OPTIONS.map((option) => ({ label: option.label, value: option.value }))}
+            disabled={isParticipantInputLocked}
             onChange={(value) => {
               const nextCount = value ?? 4;
               if (nextCount !== participantCount && previewData) {
@@ -615,7 +627,12 @@ export const MatchStakesCreatePage = () => {
             wrapperClassName="w-full max-w-[240px]"
           />
 
-          <div className="w-full max-w-[360px]">
+          <div className="relative w-full max-w-[360px]">
+            {isLoadingRules ? (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/70 backdrop-blur-[1px]">
+                <Spin size="large" />
+              </div>
+            ) : null}
             <label className="mb-1 block text-sm font-medium">Rule</label>
             <Select
               className="w-full"
@@ -629,7 +646,7 @@ export const MatchStakesCreatePage = () => {
               }}
               size="large"
               loading={isRuleLoading}
-              disabled={isRuleLoading || !ruleOptions.length}
+              disabled={isRuleLoading || !ruleOptions.length || isParticipantInputLocked}
               options={ruleOptions.map((option) => ({
                 value: option.value,
                 label: (
@@ -703,56 +720,67 @@ export const MatchStakesCreatePage = () => {
         </SectionCard>
 
         <div className="space-y-3">
-          <SectionCard title="Participants" description="Choose player and top for each participant row.">
-            <div className="space-y-3 mb-2">
-              {slots.map((slot, index) => {
-                const usedPlayerIds = new Set(
-                  slots
-                    .filter((_, itemIndex) => itemIndex !== index)
-                    .map((item) => item.playerId)
-                    .filter((item): item is string => Boolean(item))
-                );
-                const playerOptionsForRow = playerOptions.map((option) => ({
-                  ...option,
-                  disabled: usedPlayerIds.has(option.value)
-                }));
-                const disabledTopValues = slots
-                  .filter((item, itemIndex) => itemIndex !== index && Boolean(item.playerId) && typeof item.tftPlacement === "number")
-                  .map((item) => item.tftPlacement as number);
+          <SectionCard title="Participants">
+            <div className="relative">
+              {isParticipantsLoading ? (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-white/70 backdrop-blur-[1px]">
+                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <Spin size="large" />
+                    {isCalculatingSettlement ? <div className="mt-2 text-xs text-slate-600">Calculating win/loss...</div> : null}
+                  </div>
+                </div>
+              ) : null}
 
-                return (
-                  <Card key={index} size="small" className="rounded-xl border border-slate-200">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{`Participant ${index + 1}`}</div>
-                    <div className="flex flex-nowrap items-end gap-3">
-                      <SharedDropdown<string>
-                        label="Player"
-                        value={slot.playerId ?? undefined}
-                        options={playerOptionsForRow}
-                        placeholder={`Select player ${index + 1}`}
-                        allowClear
-                        disabled={playersQuery.isLoading || playersQuery.isError}
-                        onChange={(value) => updatePlayer(index, value)}
-                        wrapperClassName="min-w-0 flex-1"
-                      />
+              <div className="mb-2 space-y-3">
+                {slots.map((slot, index) => {
+                  const usedPlayerIds = new Set(
+                    slots
+                      .filter((_, itemIndex) => itemIndex !== index)
+                      .map((item) => item.playerId)
+                      .filter((item): item is string => Boolean(item))
+                  );
+                  const playerOptionsForRow = playerOptions.map((option) => ({
+                    ...option,
+                    disabled: usedPlayerIds.has(option.value)
+                  }));
+                  const disabledTopValues = slots
+                    .filter((item, itemIndex) => itemIndex !== index && Boolean(item.playerId) && typeof item.tftPlacement === "number")
+                    .map((item) => item.tftPlacement as number);
 
-                      <div className="w-[132px] shrink-0">
-                        <label className="mb-1 block text-sm font-medium">Top</label>
-                        <RankPlacementSelect
-                          value={slot.tftPlacement}
-                          onChange={(value) => updatePlacement(index, value)}
-                          min={1}
-                          max={8}
-                          disabledValues={disabledTopValues}
-                          placeholder="Select top"
-                          size="large"
-                          disabled={!slot.playerId}
-                          optionLabel={(value) => `Top ${value}`}
+                  return (
+                    <Card key={index} size="small" className="rounded-xl border border-slate-200">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{`Participant ${index + 1}`}</div>
+                      <div className="flex flex-nowrap items-end gap-3">
+                        <SharedDropdown<string>
+                          label="Player"
+                          value={slot.playerId ?? undefined}
+                          options={playerOptionsForRow}
+                          placeholder={`Select player ${index + 1}`}
+                          allowClear
+                          disabled={playersQuery.isLoading || playersQuery.isError || isParticipantInputLocked}
+                          onChange={(value) => updatePlayer(index, value)}
+                          wrapperClassName="min-w-0 flex-1"
                         />
+
+                        <div className="w-[132px] shrink-0">
+                          <label className="mb-1 block text-sm font-medium">Top</label>
+                          <RankPlacementSelect
+                            value={slot.tftPlacement}
+                            onChange={(value) => updatePlacement(index, value)}
+                            min={1}
+                            max={8}
+                            disabledValues={disabledTopValues}
+                            placeholder="Select top"
+                            size="large"
+                            disabled={!slot.playerId || isParticipantInputLocked}
+                            optionLabel={(value) => `Top ${value}`}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  </Card>
-                );
-              })}
+                    </Card>
+                  );
+                })}
+              </div>
             </div>
 
             {hasRowsMissingTop ? <Alert type="warning" showIcon message="Please choose top for all selected players." /> : null}
@@ -771,7 +799,9 @@ export const MatchStakesCreatePage = () => {
               ) : null
             }
           >
-            {!previewData ? <div className="text-sm text-slate-500">No preview yet. Fill participants to auto-calculate settlement.</div> : null}
+            {!previewData && !isCalculatingSettlement ? (
+              <div className="text-sm text-slate-500">No preview yet. Fill participants to auto-calculate settlement.</div>
+            ) : null}
 
             {previewData ? (
               <div className="space-y-4">
