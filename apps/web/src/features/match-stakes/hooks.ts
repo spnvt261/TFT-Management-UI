@@ -10,6 +10,7 @@ import type {
   MatchStakesHistoryQuery,
   DebtPeriodTimelineApiDto,
   DebtPeriodTimelineDto,
+  DebtPeriodTimelineEventDto,
   DebtPeriodTimelineMatchDto,
   ListDebtPeriodsQuery,
   MatchListItemDto,
@@ -27,6 +28,25 @@ const invalidateMatchStakesQueries = async (queryClient: QueryClient) => {
 };
 
 const toMillis = (iso: string) => Date.parse(iso);
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+const toOptionalString = (value: unknown) => (typeof value === "string" && value.trim().length > 0 ? value : null);
+const toOptionalNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null);
+const toOptionalBoolean = (value: unknown) => (typeof value === "boolean" ? value : null);
+const getHighestPositiveImpactRow = (rows: ReturnType<typeof normalizeTimelineRow>[]) => {
+  let candidate: ReturnType<typeof normalizeTimelineRow> | null = null;
+
+  for (const row of rows) {
+    if (row.matchNetVnd <= 0) {
+      continue;
+    }
+
+    if (!candidate || row.matchNetVnd > candidate.matchNetVnd) {
+      candidate = row;
+    }
+  }
+
+  return candidate;
+};
 
 const sortMatchesAsc = (matches: MatchListItemDto[]) => {
   const sorted = [...matches];
@@ -120,6 +140,7 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
 
   if (Array.isArray(timeline)) {
     const history: DebtPeriodTimelineMatchDto[] = [];
+    const events: DebtPeriodTimelineEventDto[] = [];
     let initialRows = players.map((player) =>
       normalizeTimelineRow({
         playerId: player.playerId,
@@ -153,15 +174,56 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
         continue;
       }
 
-      const matchNo = typeof item.matchNo === "number" ? item.matchNo : fallbackMatchNo;
-      fallbackMatchNo -= 1;
+      if (item.type === "MATCH") {
+        const matchNo = typeof item.matchNo === "number" ? item.matchNo : fallbackMatchNo;
+        fallbackMatchNo -= 1;
 
-      history.push({
-        matchId: item.matchId ?? `timeline-match-${history.length + 1}`,
-        playedAt: item.playedAt ?? payload.period.openedAt,
-        matchNo,
-        label: `Match ${matchNo}`,
-        players: normalizedRows
+        history.push({
+          matchId: item.matchId ?? `timeline-match-${history.length + 1}`,
+          playedAt: item.playedAt ?? payload.period.openedAt,
+          matchNo,
+          label: `Match ${matchNo}`,
+          players: normalizedRows
+        });
+        continue;
+      }
+
+      const metadata = isRecord(item.metadata) ? item.metadata : null;
+      const fallbackEventType =
+        item.type === "ADVANCE" ? "MATCH_STAKES_ADVANCE" : item.type === "NOTE" ? "MATCH_STAKES_NOTE" : null;
+      const fallbackEventId = `${payload.period.id}:${item.type}:${events.length + 1}`;
+      const metadataPeriodMatchNo = metadata ? toOptionalNumber(metadata["periodMatchNo"]) : null;
+      const metadataPlayerId =
+        metadata &&
+        (toOptionalString(metadata["playerId"]) ??
+          toOptionalString(metadata["actorPlayerId"]) ??
+          toOptionalString(metadata["ownerPlayerId"]));
+      const metadataPlayerName =
+        metadata &&
+        (toOptionalString(metadata["playerName"]) ??
+          toOptionalString(metadata["actorPlayerName"]) ??
+          toOptionalString(metadata["ownerPlayerName"]));
+      const fallbackImpactRow =
+        item.type === "ADVANCE"
+          ? getHighestPositiveImpactRow(normalizedRows) ?? normalizedRows.find((row) => row.matchNetVnd !== 0) ?? normalizedRows[0]
+          : normalizedRows.find((row) => row.matchNetVnd !== 0) ?? normalizedRows[0];
+
+      events.push({
+        id: item.eventId ?? fallbackEventId,
+        itemType: item.type,
+        postedAt: item.playedAt ?? payload.period.openedAt,
+        eventType: item.eventType ?? fallbackEventType,
+        matchId: item.matchId ?? null,
+        matchNo: item.matchNo ?? metadataPeriodMatchNo,
+        label: item.type === "ADVANCE" ? "Ứng tiền" : "Note",
+        playerId: metadataPlayerId ?? fallbackImpactRow?.playerId ?? null,
+        playerName: metadataPlayerName ?? fallbackImpactRow?.playerName ?? null,
+        amountVnd: typeof item.amountVnd === "number" ? item.amountVnd : null,
+        note: item.note ?? null,
+        impactMode: item.impactMode ?? null,
+        affectsDebt: toOptionalBoolean(item.affectsDebt),
+        rows: normalizedRows,
+        metadata
       });
     }
 
@@ -170,6 +232,7 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
       summary: payload.summary,
       players,
       history: sortTimelineDesc(history),
+      events,
       initialRows
     };
   }
@@ -205,6 +268,7 @@ const normalizeTimelinePayload = (payload: DebtPeriodTimelineApiDto): DebtPeriod
     summary: payload.summary,
     players,
     history: sortTimelineDesc(history),
+    events: [],
     initialRows: players.map((player) =>
       normalizeTimelineRow({
         playerId: player.playerId,
@@ -269,6 +333,7 @@ const buildTimelineFromFallback = (detail: DebtPeriodDetailDto, matches: MatchLi
     summary: detail.summary,
     players: detail.players,
     history: sortTimelineDesc(historyAsc),
+    events: [],
     initialRows: detail.players.map((player) =>
       normalizeTimelineRow({
         playerId: player.playerId,

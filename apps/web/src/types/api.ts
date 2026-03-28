@@ -644,12 +644,19 @@ export interface DebtPeriodTimelinePlayerRowDto {
 }
 
 export interface DebtPeriodTimelineItemDto {
-  type: "MATCH" | "INITIAL";
+  type: "MATCH" | "INITIAL" | "ADVANCE" | "NOTE";
   matchId: string | null;
   playedAt: string | null;
   matchNo: number | null;
   participantCount: number | null;
   status: string | null;
+  eventId?: string | null;
+  eventType?: string | null;
+  amountVnd?: number | null;
+  note?: string | null;
+  affectsDebt?: boolean | null;
+  impactMode?: MatchStakesHistoryImpactMode | null;
+  metadata?: unknown;
   rows: DebtPeriodTimelinePlayerRowDto[];
 }
 
@@ -661,11 +668,33 @@ export interface DebtPeriodTimelineMatchDto {
   players: DebtPeriodTimelinePlayerRowDto[];
 }
 
+export interface DebtPeriodTimelineEventDto {
+  id: string;
+  itemType: "ADVANCE" | "NOTE";
+  postedAt: string;
+  eventType?: string | null;
+  matchId?: string | null;
+  matchNo?: number | null;
+  label?: string | null;
+  playerId?: string | null;
+  playerName?: string | null;
+  amountVnd?: number | null;
+  note?: string | null;
+  reason?: string | null;
+  impactMode?: MatchStakesHistoryImpactMode | null;
+  affectsDebt?: boolean | null;
+  balanceBeforeVnd?: number | null;
+  balanceAfterVnd?: number | null;
+  rows?: DebtPeriodTimelinePlayerRowDto[];
+  metadata?: unknown;
+}
+
 export interface DebtPeriodTimelineDto {
   period: DebtPeriodDto;
   summary: DebtPeriodSummaryDto;
   players: DebtPeriodPlayerSummaryDto[];
   history: DebtPeriodTimelineMatchDto[];
+  events: DebtPeriodTimelineEventDto[];
   initialRows: DebtPeriodTimelinePlayerRowDto[];
 }
 
@@ -702,6 +731,7 @@ export interface MatchStakesHistoryPlayerImpactDto {
 export interface MatchStakesHistoryItemDto {
   id: string;
   itemType: MatchStakesHistoryEventType;
+  eventType?: string | null;
   postedAt: string;
   createdAt?: string | null;
   periodId?: string | null;
@@ -719,6 +749,7 @@ export interface MatchStakesHistoryItemDto {
   debtImpactVnd?: number | null;
   balanceBeforeVnd?: number | null;
   balanceAfterVnd?: number | null;
+  metadata?: unknown;
   settlementLines?: MatchStakesHistorySettlementLineDto[];
   playerImpacts?: MatchStakesHistoryPlayerImpactDto[];
 }
