@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Input, InputNumber, Modal, Select, Spin, Tag, message } from "antd";
+import { Alert, Button, Card, Input, InputNumber, Modal, Select, Skeleton, Spin, Tag, message } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { matchesApi } from "@/api/matchesApi";
 import { queryKeys } from "@/api/queryKeys";
@@ -410,12 +410,11 @@ export const MatchStakesCreatePage = () => {
   const hasAdjustmentNote = note.trim().length > 0;
 
   const hasRuleLoadError = ruleSetsQuery.isError || ruleDetailQueries.some((query) => query.isError);
-  const isRuleLoading = ruleSetsQuery.isLoading || ruleDetailQueries.some((query) => query.isLoading);
+  const isRuleLoading = ruleSetsQuery.isLoading || ruleDetailQueries.some((query) => query.isLoading || query.isFetching);
   const ruleLoadErrorMessage = getErrorMessage(toAppError(ruleSetsQuery.error ?? ruleDetailQueries.find((query) => query.error)?.error));
-  const isLoadingPlayers = playersQuery.isLoading;
+  const isLoadingPlayers = playersQuery.isLoading || playersQuery.isFetching;
   const isLoadingRules = isRuleLoading;
   const isCalculatingSettlement = previewMutation.isPending;
-  const isParticipantsLoading = isLoadingPlayers || isCalculatingSettlement;
   const isParticipantInputLocked = isCalculatingSettlement || createMutation.isPending;
 
   const canCreate = Boolean(previewData) && hasBalancedNet && !createMutation.isPending && (!requiresAdjustmentNote || hasAdjustmentNote);
@@ -429,6 +428,9 @@ export const MatchStakesCreatePage = () => {
       })),
     [playersQuery.data]
   );
+  const playerOptionIdSet = useMemo(() => new Set(playerOptions.map((option) => option.value)), [playerOptions]);
+  const ruleOptionIdSet = useMemo(() => new Set(ruleOptions.map((option) => option.value)), [ruleOptions]);
+  const selectedRuleSelectValue = ruleOptionIdSet.has(selectedRuleSetId) ? selectedRuleSetId : undefined;
 
   useEffect(() => {
     setSlots((previous) => syncSlotsWithCount(previous, participantCount));
@@ -674,41 +676,48 @@ export const MatchStakesCreatePage = () => {
             wrapperClassName="w-full max-w-[240px]"
           />
 
-          <div className="relative w-full max-w-[360px]">
-            {isLoadingRules ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-transparent">
-                <Spin size="large" className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
-              </div>
-            ) : null}
+          <div className="w-full max-w-[360px]">
             <label className="mb-1 block text-sm font-medium">Rule</label>
-            <Select
-              className="w-full"
-              popupMatchSelectWidth={false}
-              value={selectedRuleSetId || undefined}
-              onChange={(value) => {
-                if (value !== selectedRuleSetId && previewData) {
-                  resetPreview();
-                }
-                setSelectedRuleSetId(value);
-              }}
-              size="large"
-              loading={isRuleLoading}
-              disabled={isRuleLoading || !ruleOptions.length || isParticipantInputLocked}
-              options={ruleOptions.map((option) => ({
-                value: option.value,
-                label: (
-                  <div className="flex min-w-0 items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">{option.name}</div>
-                    </div>
-                    <Tag className="!mr-0">{`v${option.versionNo}`}</Tag>
-                  </div>
-                )
-              }))}
-              placeholder={isRuleLoading ? "Loading rules..." : "No active rule for selected participant count"}
-            />
+            <Spin
+              spinning={isLoadingRules}
+              className="w-full [&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600"
+            >
+              {isLoadingRules ? (
+                <Skeleton.Input active block size="large" />
+              ) : (
+                <Select
+                  className="w-full"
+                  popupMatchSelectWidth={false}
+                  value={selectedRuleSelectValue}
+                  onChange={(value) => {
+                    if (value !== selectedRuleSetId && previewData) {
+                      resetPreview();
+                    }
+                    setSelectedRuleSetId(value);
+                  }}
+                  size="large"
+                  disabled={!ruleOptions.length || isParticipantInputLocked}
+                  options={ruleOptions.map((option) => ({
+                    value: option.value,
+                    label: (
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-slate-900">{option.name}</div>
+                        </div>
+                        <Tag className="!mr-0">{`v${option.versionNo}`}</Tag>
+                      </div>
+                    )
+                  }))}
+                  placeholder="No active rule for selected participant count"
+                />
+              )}
+            </Spin>
 
-            {selectedRuleOption ? (
+            {isLoadingRules ? (
+              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <Skeleton active title={false} paragraph={{ rows: 2 }} />
+              </div>
+            ) : selectedRuleOption ? (
               <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -769,65 +778,69 @@ export const MatchStakesCreatePage = () => {
         <div className="space-y-3">
           <SectionCard title="Participants">
             <div className="relative">
-              {isParticipantsLoading ? (
-                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-transparent">
-                  <div className="rounded-lg bg-transparent px-4 py-3">
-                    <Spin size="large" className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
-                    {isCalculatingSettlement ? <div className="mt-2 text-xs text-slate-600">Calculating win/loss...</div> : null}
+              {isLoadingPlayers ? (
+                <Spin spinning className="w-full [&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600">
+                  <div className="mb-2 space-y-3">
+                    {Array.from({ length: participantCount }).map((_, index) => (
+                      <Card key={`participant-loading-${index}`} size="small" className="rounded-xl border border-slate-200">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{`Participant ${index + 1}`}</div>
+                        <Skeleton active title={false} paragraph={{ rows: 2 }} />
+                      </Card>
+                    ))}
                   </div>
-                </div>
-              ) : null}
+                </Spin>
+              ) : (
+                <div className="mb-2 space-y-3">
+                  {slots.map((slot, index) => {
+                    const usedPlayerIds = new Set(
+                      slots
+                        .filter((_, itemIndex) => itemIndex !== index)
+                        .map((item) => item.playerId)
+                        .filter((item): item is string => Boolean(item))
+                    );
+                    const playerOptionsForRow = playerOptions.map((option) => ({
+                      ...option,
+                      disabled: usedPlayerIds.has(option.value)
+                    }));
+                    const disabledTopValues = slots
+                      .filter((item, itemIndex) => itemIndex !== index && Boolean(item.playerId) && typeof item.tftPlacement === "number")
+                      .map((item) => item.tftPlacement as number);
 
-              <div className="mb-2 space-y-3">
-                {slots.map((slot, index) => {
-                  const usedPlayerIds = new Set(
-                    slots
-                      .filter((_, itemIndex) => itemIndex !== index)
-                      .map((item) => item.playerId)
-                      .filter((item): item is string => Boolean(item))
-                  );
-                  const playerOptionsForRow = playerOptions.map((option) => ({
-                    ...option,
-                    disabled: usedPlayerIds.has(option.value)
-                  }));
-                  const disabledTopValues = slots
-                    .filter((item, itemIndex) => itemIndex !== index && Boolean(item.playerId) && typeof item.tftPlacement === "number")
-                    .map((item) => item.tftPlacement as number);
-
-                  return (
-                    <Card key={index} size="small" className="rounded-xl border border-slate-200">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{`Participant ${index + 1}`}</div>
-                      <div className="flex flex-nowrap items-end gap-3">
-                        <SharedDropdown<string>
-                          label="Player"
-                          value={slot.playerId ?? undefined}
-                          options={playerOptionsForRow}
-                          placeholder={`Select player ${index + 1}`}
-                          allowClear
-                          disabled={playersQuery.isLoading || playersQuery.isError || isParticipantInputLocked}
-                          onChange={(value) => updatePlayer(index, value)}
-                          wrapperClassName="min-w-0 flex-1"
-                        />
-
-                        <div className="w-[132px] shrink-0">
-                          <label className="mb-1 block text-sm font-medium">Top</label>
-                          <RankPlacementSelect
-                            value={slot.tftPlacement}
-                            onChange={(value) => updatePlacement(index, value)}
-                            min={1}
-                            max={8}
-                            disabledValues={disabledTopValues}
-                            placeholder="Select top"
-                            size="large"
-                            disabled={!slot.playerId || isParticipantInputLocked}
-                            optionLabel={(value) => `Top ${value}`}
+                    return (
+                      <Card key={index} size="small" className="rounded-xl border border-slate-200">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{`Participant ${index + 1}`}</div>
+                        <div className="flex flex-nowrap items-end gap-3">
+                          <SharedDropdown<string>
+                            label="Player"
+                            value={slot.playerId && playerOptionIdSet.has(slot.playerId) ? slot.playerId : undefined}
+                            options={playerOptionsForRow}
+                            placeholder={`Select player ${index + 1}`}
+                            allowClear
+                            disabled={playersQuery.isError || isParticipantInputLocked}
+                            onChange={(value) => updatePlayer(index, value)}
+                            wrapperClassName="min-w-0 flex-1"
                           />
+
+                          <div className="w-[132px] shrink-0">
+                            <label className="mb-1 block text-sm font-medium">Top</label>
+                            <RankPlacementSelect
+                              value={slot.tftPlacement}
+                              onChange={(value) => updatePlacement(index, value)}
+                              min={1}
+                              max={8}
+                              disabledValues={disabledTopValues}
+                              placeholder="Select top"
+                              size="large"
+                              disabled={!slot.playerId || isParticipantInputLocked}
+                              optionLabel={(value) => `Top ${value}`}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {hasRowsMissingTop ? <Alert type="warning" showIcon message="Please choose top for all selected players." /> : null}
@@ -846,6 +859,16 @@ export const MatchStakesCreatePage = () => {
               ) : null
             }
           >
+            {isCalculatingSettlement ? (
+              <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center gap-2 text-sm text-slate-700">
+                  <Spin size="small" className="[&_.ant-spin-dot-item]:!bg-brand-600 [&_.ant-spin-text]:!text-brand-600" />
+                  <span>Calculating win/loss...</span>
+                </div>
+                <Skeleton active title={false} paragraph={{ rows: 3 }} />
+              </div>
+            ) : null}
+
             {!previewData && !isCalculatingSettlement ? (
               <div className="text-sm text-slate-500">No preview yet. Fill participants to auto-calculate settlement.</div>
             ) : null}
