@@ -147,26 +147,67 @@ const formatCloseBalanceInputValue = (value: string | number | undefined) => {
     return "";
   }
 
-  const numericValue = typeof value === "number" ? value : Number(String(value).replace(/[^\d-]/g, ""));
-  if (!Number.isFinite(numericValue)) {
+  const normalized = String(value).replace(/[^\d-]/g, "");
+  if (!normalized) {
     return "";
   }
 
-  return Math.trunc(numericValue).toLocaleString("en-US");
+  if (normalized === "-") {
+    return normalized;
+  }
+
+  const isNegative = normalized.startsWith("-");
+  const digits = normalized.replace(/-/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  const formatted = Number(digits).toLocaleString("en-US");
+  return isNegative ? `-${formatted}` : formatted;
 };
 
 const parseCloseBalanceInputValue = (value: string | undefined) => {
   if (!value) {
-    return 0;
+    return "";
   }
 
   const normalized = value.replace(/[^\d-]/g, "");
-  if (!normalized || normalized === "-") {
-    return 0;
+  if (!normalized) {
+    return "";
   }
 
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (normalized === "-") {
+    return normalized;
+  }
+
+  const isNegative = normalized.startsWith("-");
+  const digits = normalized.replace(/-/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  return isNegative ? `-${digits}` : digits;
+};
+
+const formatUnsignedAmountInputValue = (value: string | number | undefined) => {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  const normalized = String(value).replace(/[^\d]/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  return Number(normalized).toLocaleString("en-US");
+};
+
+const parseUnsignedAmountInputValue = (value: string | undefined) => {
+  if (!value) {
+    return "";
+  }
+
+  return value.replace(/[^\d]/g, "");
 };
 
 const SectionLoadingOverlay = ({ spinning }: { spinning: boolean }) =>
@@ -2077,6 +2118,8 @@ export const MatchStakesPage = () => {
                         min={1}
                         precision={0}
                         step={10000}
+                        formatter={formatUnsignedAmountInputValue}
+                        parser={parseUnsignedAmountInputValue}
                         value={line.amountVnd}
                         onChange={(value) =>
                           setSettlementLines((previous) =>
@@ -2239,21 +2282,43 @@ export const MatchStakesPage = () => {
                 {closeBalanceRows.map((player) => (
                   <div key={player.playerId} className="flex items-center justify-between gap-2">
                     <span className="text-xs text-slate-600">{player.playerName}</span>
-                    <InputNumber
-                      value={player.draftNetVnd}
-                      precision={0}
-                      step={10000}
-                      className="w-[170px]"
-                      formatter={formatCloseBalanceInputValue}
-                      parser={parseCloseBalanceInputValue}
-                      addonAfter="VND"
-                      onChange={(value) =>
-                        setCloseBalanceDraft((previous) => ({
-                          ...previous,
-                          [player.playerId]: typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0
-                        }))
-                      }
-                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="middle"
+                        className="md:hidden  aspect-square !px-0 shrink-0"
+                        onClick={() =>
+                          setCloseBalanceDraft((previous) => ({
+                            ...previous,
+                            [player.playerId]: player.draftNetVnd === 0 ? 0 : -Math.trunc(player.draftNetVnd)
+                          }))
+                        }
+                      >
+                        +/-
+                      </Button>
+                      <InputNumber
+                        value={player.draftNetVnd}
+                        precision={0}
+                        step={10000}
+                        inputMode="decimal"
+                        pattern="-?[0-9]*"
+                        className="w-[170px]"
+                        formatter={formatCloseBalanceInputValue}
+                        parser={parseCloseBalanceInputValue}
+                        addonAfter="VND"
+                        onChange={(value) =>
+                          setCloseBalanceDraft((previous) => {
+                            if (typeof value !== "number" || !Number.isFinite(value)) {
+                              return previous;
+                            }
+
+                            return {
+                              ...previous,
+                              [player.playerId]: Math.trunc(value)
+                            };
+                          })
+                        }
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

@@ -103,6 +103,53 @@ const buildEmptySlots = (count: ParticipantCount): MatchSlot[] =>
     tftPlacement: undefined
   }));
 
+const formatSignedAmountInputValue = (value: string | number | undefined) => {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+
+  const normalized = String(value).replace(/[^\d-]/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized === "-") {
+    return "-";
+  }
+
+  const isNegative = normalized.startsWith("-");
+  const digits = normalized.replace(/-/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  const formatted = Number(digits).toLocaleString("en-US");
+  return isNegative ? `-${formatted}` : formatted;
+};
+
+const parseSignedAmountInputValue = (value: string | undefined) => {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/[^\d-]/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized === "-") {
+    return normalized;
+  }
+
+  const isNegative = normalized.startsWith("-");
+  const digits = normalized.replace(/-/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  return isNegative ? `-${digits}` : digits;
+};
+
 const hydrateSlots = (count: ParticipantCount, slotPlayerIds: string[] | undefined) => {
   const next = buildEmptySlots(count);
   const used = new Set<string>();
@@ -879,21 +926,52 @@ export const MatchStakesCreatePage = () => {
                               participant.suggestedNetVnd
                             )}`}</div>
                           </div>
-                          <InputNumber
-                            className="w-full"
-                            size="large"
-                            precision={0}
-                            step={10000}
-                            controls
-                            value={participant.currentNetVnd}
-                            onChange={(value) =>
-                              setNetByPlayerId((previous) => ({
-                                ...previous,
-                                [participant.playerId]: Number(value ?? 0)
-                              }))
-                            }
-                            addonAfter="VND"
-                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="middle"
+                              className="md:hidden  aspect-square !px-0 shrink-0"
+                              onClick={() =>
+                                setNetByPlayerId((previous) => {
+                                  const baseValue = previous[participant.playerId] ?? participant.currentNetVnd;
+                                  if (!Number.isFinite(baseValue)) {
+                                    return previous;
+                                  }
+
+                                  return {
+                                    ...previous,
+                                    [participant.playerId]: baseValue === 0 ? 0 : -Math.trunc(baseValue)
+                                  };
+                                })
+                              }
+                            >
+                              +/-
+                            </Button>
+                            <InputNumber
+                              className="w-full"
+                              size="large"
+                              precision={0}
+                              step={10000}
+                              formatter={formatSignedAmountInputValue}
+                              parser={parseSignedAmountInputValue}
+                              inputMode="decimal"
+                              pattern="-?[0-9]*"
+                              controls
+                              value={participant.currentNetVnd}
+                              onChange={(value) =>
+                                setNetByPlayerId((previous) => {
+                                  if (typeof value !== "number" || !Number.isFinite(value)) {
+                                    return previous;
+                                  }
+
+                                  return {
+                                    ...previous,
+                                    [participant.playerId]: Math.trunc(value)
+                                  };
+                                })
+                              }
+                              addonAfter="VND"
+                            />
+                          </div>
                         </div>
                       </Card>
                     ))}
