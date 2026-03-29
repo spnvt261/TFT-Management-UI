@@ -806,6 +806,9 @@ export const MatchStakesPage = () => {
     const saved = window.localStorage.getItem(HISTORY_VIEW_MODE_STORAGE_KEY);
     return saved === "detail" ? "detail" : DEFAULT_HISTORY_VIEW_MODE;
   });
+  const [historyFilterOpen, setHistoryFilterOpen] = useState(false);
+  const [draftHistoryViewMode, setDraftHistoryViewMode] = useState<HistoryViewMode>(historyViewMode);
+  const [draftHistoryDebtViewMode, setDraftHistoryDebtViewMode] = useState<CurrentDebtViewMode>(currentDebtViewMode);
 
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementApiError, setSettlementApiError] = useState<string | null>(null);
@@ -1254,6 +1257,25 @@ export const MatchStakesPage = () => {
     setPeriodFilterOpen(false);
   };
 
+  const openHistoryFilterModal = () => {
+    setDraftHistoryViewMode(historyViewMode);
+    setDraftHistoryDebtViewMode(currentDebtViewMode);
+    setHistoryFilterOpen(true);
+  };
+
+  const resetHistoryFilterDraft = () => {
+    setDraftHistoryViewMode(DEFAULT_HISTORY_VIEW_MODE);
+    setDraftHistoryDebtViewMode(DEFAULT_CURRENT_DEBT_VIEW_MODE);
+  };
+
+  const applyHistoryFilter = () => {
+    setHistoryViewMode(draftHistoryViewMode);
+    if (hideCurrentDebtSection) {
+      setCurrentDebtViewMode(draftHistoryDebtViewMode);
+    }
+    setHistoryFilterOpen(false);
+  };
+
   const openMatchDetail = (historyItem: DebtPeriodTimelineMatchDto, periodNo?: number | null) => {
     setSelectedMatchId(historyItem.matchId);
     setSelectedMatchContext({
@@ -1555,15 +1577,9 @@ export const MatchStakesPage = () => {
       <SectionCard
         title="History"
         actions={
-          <Segmented
-            size="small"
-            value={historyViewMode}
-            options={[
-              { label: "Minimal", value: "minimal" },
-              { label: "Detail", value: "detail" }
-            ]}
-            onChange={(value) => setHistoryViewMode(value as HistoryViewMode)}
-          />
+          <Tooltip title="Filter history view">
+            <Button icon={<FilterOutlined />} onClick={openHistoryFilterModal} />
+          </Tooltip>
         }
       >
         <div className="relative">
@@ -1876,6 +1892,53 @@ export const MatchStakesPage = () => {
               )}
             </>
           )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="Filter History"
+        open={historyFilterOpen}
+        footer={null}
+        onCancel={() => setHistoryFilterOpen(false)}
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">History view</label>
+            <Segmented
+              block
+              value={draftHistoryViewMode}
+              options={[
+                { label: "Minimal", value: "minimal" },
+                { label: "Detail", value: "detail" }
+              ]}
+              onChange={(value) => setDraftHistoryViewMode(value as HistoryViewMode)}
+            />
+          </div>
+
+          {hideCurrentDebtSection ? (
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Debt mode</label>
+              <Segmented
+                block
+                value={draftHistoryDebtViewMode}
+                options={[
+                  { label: "Match only", value: "match-only" },
+                  { label: "Advance only", value: "advance-only" },
+                  { label: "Combined", value: "combined" }
+                ]}
+                onChange={(value) => setDraftHistoryDebtViewMode(value as CurrentDebtViewMode)}
+              />
+            </div>
+          ) : null}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <Button onClick={resetHistoryFilterDraft}>
+              Reset to default
+            </Button>
+            <Button type="primary" onClick={applyHistoryFilter}>
+              Apply filter
+            </Button>
+          </div>
         </div>
       </Modal>
 
