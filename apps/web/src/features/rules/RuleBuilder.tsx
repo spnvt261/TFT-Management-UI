@@ -1,6 +1,7 @@
 import { Button, Card, Collapse, Input, InputNumber, Select, Switch } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Controller, useFieldArray, useFormContext } from "react-hook-form";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import type { RawRuleSetVersionValues } from "@/features/rules/schemas";
 import { ruleKindLabels } from "@/lib/labels";
 
@@ -195,7 +196,7 @@ const RuleItemEditor = ({ index, onRemove }: RuleItemEditorProps) => {
                         control={control}
                         name={`rules.${index}.actions.${actionIndex}.amountVnd`}
                         render={({ field }) => (
-                          <InputNumber min={1} precision={0} value={field.value} onChange={(value) => field.onChange(value ?? 0)} className="w-full" />
+                          <CurrencyAmountInput min={1} value={field.value} onChange={field.onChange} className="w-full" />
                         )}
                       />
                     </div>

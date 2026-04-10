@@ -9,7 +9,7 @@ import {
   WalletOutlined
 } from "@ant-design/icons";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Alert, Button, DatePicker, Input, InputNumber, Modal, Pagination, Select, Skeleton, Tag, Tooltip, message } from "antd";
+import { Alert, Button, DatePicker, Input, Modal, Pagination, Select, Skeleton, Tag, Tooltip, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { Controller, useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
@@ -47,6 +47,7 @@ import { GroupFundHistoryFeed, type GroupFundHistoryFeedItem } from "@/features/
 import { GroupFundAdvanceModal } from "@/features/group-fund/components/GroupFundAdvanceModal";
 import { MatchDetailOverlay } from "@/features/matches/MatchDetailOverlay";
 import { useActivePlayers } from "@/features/players/hooks";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd, nowIso } from "@/lib/format";
 import { groupFundTransactionLabels } from "@/lib/labels";
@@ -1075,11 +1076,11 @@ export const GroupFundPage = () => {
               control={contributionControl}
               name="amountVnd"
               render={({ field }) => (
-                <InputNumber
+                <CurrencyAmountInput
                   min={1}
-                  precision={0}
                   value={field.value}
-                  onChange={(value) => field.onChange(value ?? 0)}
+                  step={10000}
+                  onChange={field.onChange}
                   className="w-full"
                   size="large"
                   status={contributionErrors.amountVnd ? "error" : ""}
@@ -1173,11 +1174,11 @@ export const GroupFundPage = () => {
               control={withdrawalControl}
               name="amountVnd"
               render={({ field }) => (
-                <InputNumber
+                <CurrencyAmountInput
                   min={1}
-                  precision={0}
                   value={field.value}
-                  onChange={(value) => field.onChange(value ?? 0)}
+                  step={10000}
+                  onChange={field.onChange}
                   className="w-full"
                   size="large"
                   status={withdrawalErrors.amountVnd ? "error" : ""}
@@ -1288,11 +1289,11 @@ export const GroupFundPage = () => {
               control={transactionControl}
               name="amountVnd"
               render={({ field }) => (
-                <InputNumber
+                <CurrencyAmountInput
                   min={1}
-                  precision={0}
                   value={field.value}
-                  onChange={(value) => field.onChange(value ?? 0)}
+                  step={10000}
+                  onChange={field.onChange}
                   className="w-full"
                   size="large"
                   status={transactionErrors.amountVnd ? "error" : ""}

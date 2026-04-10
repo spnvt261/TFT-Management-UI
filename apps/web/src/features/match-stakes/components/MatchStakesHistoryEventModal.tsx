@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Button, Input, InputNumber, Modal, Radio, Select, Tag } from "antd";
+import { Button, Input, Modal, Radio, Select, Tag } from "antd";
 import { Controller, useForm } from "react-hook-form";
 import { FormApiError } from "@/components/common/FormApiError";
 import { historyEventSchema, type HistoryEventValues } from "@/features/match-stakes/schemas";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import type { CreateMatchStakesHistoryEventRequest } from "@/types/api";
 
 interface SelectOption {
@@ -110,29 +111,6 @@ export const MatchStakesHistoryEventModal = ({
     }
 
     return null;
-  };
-
-  const formatAmountVnd = (value: string | number | undefined) => {
-    if (value === undefined || value === null || value === "") {
-      return "";
-    }
-
-    const normalized = String(value).replace(/[^\d.-]/g, "");
-    if (!normalized) {
-      return "";
-    }
-
-    const [intPart, decimalPart] = normalized.split(".");
-    const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return decimalPart ? `${formattedInt}.${decimalPart}` : formattedInt;
-  };
-
-  const parseAmountVnd = (value: string | undefined) => {
-    if (!value) {
-      return "";
-    }
-
-    return value.replace(/[^\d-]/g, "");
   };
 
   const {
@@ -296,18 +274,14 @@ export const MatchStakesHistoryEventModal = ({
             control={control}
             name="amountVnd"
             render={({ field }) => (
-              <InputNumber
+              <CurrencyAmountInput
                 className="w-full"
                 min={1}
-                precision={0}
                 step={10000}
-                inputMode="numeric"
-                pattern="[0-9]*"
                 value={field.value}
-                formatter={formatAmountVnd}
-                parser={parseAmountVnd}
                 addonAfter="VND"
-                onChange={(value) => field.onChange(typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined)}
+                emptyValue={undefined}
+                onChange={field.onChange}
                 status={errors.amountVnd ? "error" : ""}
               />
             )}

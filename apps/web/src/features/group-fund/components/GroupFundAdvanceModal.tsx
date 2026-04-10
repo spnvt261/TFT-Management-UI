@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Button, DatePicker, Input, InputNumber, Modal, Select } from "antd";
+import { Button, DatePicker, Input, Modal, Select } from "antd";
 import dayjs from "dayjs";
 import { Controller, useForm } from "react-hook-form";
 import { FormApiError } from "@/components/common/FormApiError";
 import { fundAdvanceSchema, type FundAdvanceValues } from "@/features/group-fund/schemas";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import type { CreateGroupFundAdvanceRequest } from "@/types/api";
 import { nowIso } from "@/lib/format";
 
@@ -99,12 +100,12 @@ export const GroupFundAdvanceModal = ({
             control={control}
             name="amountVnd"
             render={({ field }) => (
-              <InputNumber
+              <CurrencyAmountInput
                 className="w-full"
                 min={1}
-                precision={0}
                 value={field.value}
-                onChange={(value) => field.onChange(value ?? 0)}
+                step={10000}
+                onChange={field.onChange}
                 status={errors.amountVnd ? "error" : ""}
               />
             )}

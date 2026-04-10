@@ -7,7 +7,7 @@ import {
   FilterOutlined,
   PlusOutlined
 } from "@ant-design/icons";
-import { Alert, Button, DatePicker, Input, InputNumber, Modal, Segmented, Select, Skeleton, Spin, Tag, Tooltip, message } from "antd";
+import { Alert, Button, DatePicker, Input, Modal, Segmented, Select, Skeleton, Spin, Tag, Tooltip, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import { toAppError } from "@/api/httpClient";
@@ -39,6 +39,7 @@ import { MatchStakesHistoryEventModal } from "@/features/match-stakes/components
 import { MatchStakesHistoryFeed, type MatchStakesHistoryFeedItem } from "@/features/match-stakes/components/MatchStakesHistoryFeed";
 import { MatchDetailOverlay, type MatchStakesDetailContext } from "@/features/matches/MatchDetailOverlay";
 import { useActivePlayers } from "@/features/players/hooks";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import { getErrorMessage } from "@/lib/error-messages";
 import { formatDateTime, formatVnd } from "@/lib/format";
 import { debtPeriodStatusLabels, getEnumLabel } from "@/lib/labels";
@@ -140,74 +141,6 @@ const sortByPlayerNameAsc = <T extends { playerName: string }>(items: T[]) => {
   const next = [...items];
   next.sort((left, right) => left.playerName.localeCompare(right.playerName));
   return next;
-};
-
-const formatCloseBalanceInputValue = (value: string | number | undefined) => {
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
-
-  const normalized = String(value).replace(/[^\d-]/g, "");
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized === "-") {
-    return normalized;
-  }
-
-  const isNegative = normalized.startsWith("-");
-  const digits = normalized.replace(/-/g, "");
-  if (!digits) {
-    return "";
-  }
-
-  const formatted = Number(digits).toLocaleString("en-US");
-  return isNegative ? `-${formatted}` : formatted;
-};
-
-const parseCloseBalanceInputValue = (value: string | undefined) => {
-  if (!value) {
-    return "";
-  }
-
-  const normalized = value.replace(/[^\d-]/g, "");
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized === "-") {
-    return normalized;
-  }
-
-  const isNegative = normalized.startsWith("-");
-  const digits = normalized.replace(/-/g, "");
-  if (!digits) {
-    return "";
-  }
-
-  return isNegative ? `-${digits}` : digits;
-};
-
-const formatUnsignedAmountInputValue = (value: string | number | undefined) => {
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
-
-  const normalized = String(value).replace(/[^\d]/g, "");
-  if (!normalized) {
-    return "";
-  }
-
-  return Number(normalized).toLocaleString("en-US");
-};
-
-const parseUnsignedAmountInputValue = (value: string | undefined) => {
-  if (!value) {
-    return "";
-  }
-
-  return value.replace(/[^\d]/g, "");
 };
 
 const SectionLoadingOverlay = ({ spinning }: { spinning: boolean }) =>
@@ -2113,13 +2046,10 @@ export const MatchStakesPage = () => {
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[220px_1fr] sm:items-end">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">Amount (VND)</label>
-                      <InputNumber
+                      <CurrencyAmountInput
                         className="w-full"
                         min={1}
-                        precision={0}
                         step={10000}
-                        formatter={formatUnsignedAmountInputValue}
-                        parser={parseUnsignedAmountInputValue}
                         value={line.amountVnd}
                         onChange={(value) =>
                           setSettlementLines((previous) =>
@@ -2295,16 +2225,12 @@ export const MatchStakesPage = () => {
                       >
                         +/-
                       </Button>
-                      <InputNumber
+                      <CurrencyAmountInput
                         value={player.draftNetVnd}
-                        precision={0}
                         step={10000}
-                        inputMode="decimal"
-                        pattern="-?[0-9]*"
                         className="w-[170px]"
-                        formatter={formatCloseBalanceInputValue}
-                        parser={parseCloseBalanceInputValue}
                         addonAfter="VND"
+                        signed
                         onChange={(value) =>
                           setCloseBalanceDraft((previous) => {
                             if (typeof value !== "number" || !Number.isFinite(value)) {

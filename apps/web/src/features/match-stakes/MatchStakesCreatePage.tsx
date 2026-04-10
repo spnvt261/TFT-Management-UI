@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Input, InputNumber, Modal, Select, Skeleton, Spin, Tag, message } from "antd";
+import { Alert, Button, Card, Input, Modal, Select, Skeleton, Spin, Tag, message } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { matchesApi } from "@/api/matchesApi";
 import { queryKeys } from "@/api/queryKeys";
@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
 import { ErrorState } from "@/components/states/ErrorState";
 import { FormApiError } from "@/components/common/FormApiError";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import { RankPlacementSelect } from "@/features/rules/create-flow/components/RankPlacementSelect";
 import { toAppError } from "@/api/httpClient";
 import { getErrorMessage } from "@/lib/error-messages";
@@ -102,53 +103,6 @@ const buildEmptySlots = (count: ParticipantCount): MatchSlot[] =>
     playerId: null,
     tftPlacement: undefined
   }));
-
-const formatSignedAmountInputValue = (value: string | number | undefined) => {
-  if (value === undefined || value === null || value === "") {
-    return "";
-  }
-
-  const normalized = String(value).replace(/[^\d-]/g, "");
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized === "-") {
-    return "-";
-  }
-
-  const isNegative = normalized.startsWith("-");
-  const digits = normalized.replace(/-/g, "");
-  if (!digits) {
-    return "";
-  }
-
-  const formatted = Number(digits).toLocaleString("en-US");
-  return isNegative ? `-${formatted}` : formatted;
-};
-
-const parseSignedAmountInputValue = (value: string | undefined) => {
-  if (!value) {
-    return "";
-  }
-
-  const normalized = value.replace(/[^\d-]/g, "");
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized === "-") {
-    return normalized;
-  }
-
-  const isNegative = normalized.startsWith("-");
-  const digits = normalized.replace(/-/g, "");
-  if (!digits) {
-    return "";
-  }
-
-  return isNegative ? `-${digits}` : digits;
-};
 
 const hydrateSlots = (count: ParticipantCount, slotPlayerIds: string[] | undefined) => {
   const next = buildEmptySlots(count);
@@ -969,16 +923,12 @@ export const MatchStakesCreatePage = () => {
                             >
                               +/-
                             </Button>
-                            <InputNumber
+                            <CurrencyAmountInput
                               className="w-full"
                               size="large"
-                              precision={0}
                               step={10000}
-                              formatter={formatSignedAmountInputValue}
-                              parser={parseSignedAmountInputValue}
-                              inputMode="decimal"
-                              pattern="-?[0-9]*"
                               controls
+                              signed
                               value={participant.currentNetVnd}
                               onChange={(value) =>
                                 setNetByPlayerId((previous) => {

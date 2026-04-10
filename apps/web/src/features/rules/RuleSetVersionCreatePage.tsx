@@ -36,6 +36,7 @@ import { PageLoading } from "@/components/states/PageLoading";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import { getErrorMessage } from "@/lib/error-messages";
 import { moduleLabels } from "@/lib/labels";
 import { toAppError } from "@/api/httpClient";
@@ -377,11 +378,10 @@ const MatchStakesBuilderForm = ({ ruleSet, prefill }: MatchStakesBuilderFormProp
                 control={form.control}
                 name={`payouts.${index}.amountVnd`}
                 render={({ field }) => (
-                  <InputNumber
+                  <CurrencyAmountInput
                     min={1}
-                    precision={0}
                     value={field.value}
-                    onChange={(value) => field.onChange(value ?? 0)}
+                    onChange={field.onChange}
                     className="w-full"
                     addonAfter="VND"
                   />
@@ -404,11 +404,10 @@ const MatchStakesBuilderForm = ({ ruleSet, prefill }: MatchStakesBuilderFormProp
                 control={form.control}
                 name={`losses.${index}.amountVnd`}
                 render={({ field }) => (
-                  <InputNumber
+                  <CurrencyAmountInput
                     min={1}
-                    precision={0}
                     value={field.value}
-                    onChange={(value) => field.onChange(value ?? 0)}
+                    onChange={field.onChange}
                     className="w-full"
                     addonAfter="VND"
                   />
@@ -489,11 +488,10 @@ const MatchStakesBuilderForm = ({ ruleSet, prefill }: MatchStakesBuilderFormProp
                       control={form.control}
                       name={`penalties.${index}.amountVnd`}
                       render={({ field: formField }) => (
-                        <InputNumber
+                        <CurrencyAmountInput
                           min={1}
-                          precision={0}
                           value={formField.value}
-                          onChange={(value) => formField.onChange(value ?? 0)}
+                          onChange={formField.onChange}
                           className="w-full"
                           addonAfter="VND"
                         />

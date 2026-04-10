@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Input, InputNumber, Modal, Select, Tag, message } from "antd";
+import { Alert, Button, Card, Input, Modal, Select, Tag, message } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { matchesApi } from "@/api/matchesApi";
 import { queryKeys } from "@/api/queryKeys";
@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { SectionCard } from "@/components/layout/SectionCard";
 import { ErrorState } from "@/components/states/ErrorState";
 import { FormApiError } from "@/components/common/FormApiError";
+import { CurrencyAmountInput } from "@/features/rules/create-flow/components/CurrencyAmountInput";
 import { RankPlacementSelect } from "@/features/rules/create-flow/components/RankPlacementSelect";
 import { toAppError } from "@/api/httpClient";
 import { getErrorMessage } from "@/lib/error-messages";
@@ -858,13 +859,13 @@ export const GroupFundCreatePage = () => {
                               participant.suggestedNetVnd
                             )}`}</div>
                           </div>
-                          <InputNumber
+                          <CurrencyAmountInput
                             className="w-full"
                             size="large"
-                            precision={0}
                             step={10000}
                             controls
                             max={0}
+                            signed
                             value={participant.currentNetVnd}
                             onChange={(value) =>
                               setNetByPlayerId((previous) => ({
