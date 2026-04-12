@@ -192,10 +192,12 @@ export const MatchStakesCreatePage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const initialDraft = useMemo(() => loadDraft(), []);
+  const hasInitialDraft = initialDraft !== null;
 
   const [participantCount, setParticipantCount] = useState<ParticipantCount>(() => initialDraft?.participantCount ?? 4);
   const [selectedRuleSetId, setSelectedRuleSetId] = useState<string>(initialDraft?.ruleSetId ?? "");
   const [slots, setSlots] = useState<MatchSlot[]>(() => hydrateSlots(initialDraft?.participantCount ?? 4, initialDraft?.slotPlayerIds));
+  const [hasAppliedInitialPlayerDefaults, setHasAppliedInitialPlayerDefaults] = useState(hasInitialDraft);
   const [note, setNote] = useState("");
   const [previewData, setPreviewData] = useState<PreviewMatchResultDto | null>(null);
   const [lastCalculatedPreviewKey, setLastCalculatedPreviewKey] = useState<string | null>(null);
@@ -403,6 +405,16 @@ export const MatchStakesCreatePage = () => {
       }))
     );
   }, [playersQuery.data]);
+
+  useEffect(() => {
+    if (hasAppliedInitialPlayerDefaults || !playersQuery.data) {
+      return;
+    }
+
+    setParticipantCount(4);
+    setSlots(() => hydrateSlots(4, playersQuery.data.slice(0, 4).map((player) => player.id)));
+    setHasAppliedInitialPlayerDefaults(true);
+  }, [hasAppliedInitialPlayerDefaults, playersQuery.data]);
 
   useEffect(() => {
     if (!ruleOptions.length) {
