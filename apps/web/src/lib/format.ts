@@ -15,7 +15,7 @@ export const resolveTimezone = (override?: string) => override ?? env.appTimeZon
 export type MoneyDisplayMode = "vnd" | "dong" | "basic";
 
 export const MONEY_DISPLAY_MODE_STORAGE_KEY = "tft2.settings.money.display-mode";
-export const DEFAULT_MONEY_DISPLAY_MODE: MoneyDisplayMode = "vnd";
+export const DEFAULT_MONEY_DISPLAY_MODE: MoneyDisplayMode = "basic";
 
 const isMoneyDisplayMode = (value: string | null): value is MoneyDisplayMode =>
   value === "vnd" || value === "dong" || value === "basic";

@@ -8,9 +8,9 @@ afterEach(() => {
 });
 
 describe("format utils", () => {
-  it("formats VND without changing integer semantics", () => {
-    expect(formatVnd(1234567)).toContain("1.234.567");
-    expect(formatVnd(-50000)).toContain("-50.000");
+  it("defaults to basic money display mode when no local setting exists", () => {
+    expect(formatVnd(1234567)).toBe("1.234,6");
+    expect(formatVnd(-50000)).toBe("-50");
   });
 
   it("supports alternative money display modes", () => {
