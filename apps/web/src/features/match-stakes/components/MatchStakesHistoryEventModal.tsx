@@ -24,7 +24,6 @@ interface MatchStakesHistoryEventModalProps {
   onSubmit: (payload: CreateMatchStakesHistoryEventRequest) => Promise<void>;
 }
 
-const ADVANCE_SELECTION_STORAGE_KEY = "tft2.match-stakes.history-event.advance-selection";
 const NOTE_PRESET_OPTIONS = [
   { value: "MACHINE", label: "Tiền máy", note: "Tiền máy" },
   { value: "TABLE", label: "Tiền bàn", note: "Tiền bàn" },
@@ -33,41 +32,6 @@ const NOTE_PRESET_OPTIONS = [
 ] as const;
 
 type NotePreset = (typeof NOTE_PRESET_OPTIONS)[number]["value"];
-type AdvanceSelectionSnapshot = {
-  participantPlayerIds: string[];
-  playerId: string | null;
-};
-
-const readAdvanceSelectionSnapshot = (): AdvanceSelectionSnapshot => {
-  if (typeof window === "undefined") {
-    return { participantPlayerIds: [], playerId: null };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(ADVANCE_SELECTION_STORAGE_KEY);
-    if (!raw) {
-      return { participantPlayerIds: [], playerId: null };
-    }
-
-    const parsed = JSON.parse(raw) as Partial<AdvanceSelectionSnapshot>;
-    const participantPlayerIds = Array.isArray(parsed.participantPlayerIds)
-      ? parsed.participantPlayerIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      : [];
-    const playerId = typeof parsed.playerId === "string" && parsed.playerId.trim().length > 0 ? parsed.playerId : null;
-
-    return { participantPlayerIds, playerId };
-  } catch {
-    return { participantPlayerIds: [], playerId: null };
-  }
-};
-
-const writeAdvanceSelectionSnapshot = (snapshot: AdvanceSelectionSnapshot) => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(ADVANCE_SELECTION_STORAGE_KEY, JSON.stringify(snapshot));
-};
 
 const getNoteByPreset = (preset: NotePreset, otherValue: string) => {
   if (preset === "OTHER") {
@@ -76,6 +40,20 @@ const getNoteByPreset = (preset: NotePreset, otherValue: string) => {
 
   const found = NOTE_PRESET_OPTIONS.find((option) => option.value === preset);
   return found?.note ?? "";
+};
+
+const normalizePlayerName = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .trim()
+    .toLowerCase();
+
+const findPreferredAdvancerId = (options: SelectOption[]) => {
+  const tienOption = options.find((option) => normalizePlayerName(option.label) === "tien");
+  return tienOption?.value ?? options[0]?.value ?? "";
 };
 
 export const MatchStakesHistoryEventModal = ({
@@ -139,10 +117,9 @@ export const MatchStakesHistoryEventModal = ({
       return;
     }
 
-    const snapshot = readAdvanceSelectionSnapshot();
-    const availablePlayerIds = new Set(playerOptions.map((option) => option.value));
-    const participantPlayerIds = snapshot.participantPlayerIds.filter((playerId) => availablePlayerIds.has(playerId));
-    const playerId = snapshot.playerId && participantPlayerIds.includes(snapshot.playerId) ? snapshot.playerId : "";
+    const participantPlayerIds = playerOptions.slice(0, 4).map((option) => option.value);
+    const selectedParticipantOptions = playerOptions.filter((option) => participantPlayerIds.includes(option.value));
+    const playerId = findPreferredAdvancerId(selectedParticipantOptions);
 
     reset({
       eventType: "ADVANCE",
@@ -176,13 +153,6 @@ export const MatchStakesHistoryEventModal = ({
       setValue("playerId", "", { shouldValidate: true });
     }
   }, [participantPlayerIds, selectedPlayerId, setValue]);
-
-  useEffect(() => {
-    writeAdvanceSelectionSnapshot({
-      participantPlayerIds,
-      playerId: selectedPlayerId || null
-    });
-  }, [participantPlayerIds, selectedPlayerId]);
 
   useEffect(() => {
     setValue("note", getNoteByPreset(notePreset, noteOther), { shouldValidate: true });
